@@ -26,15 +26,24 @@ function wallet() { return state.wallets.find(w=>w.id === state.walletId) || sta
 function cat(id) { return state.categories.find(c=>c.id===id); }
 function walletName(id) { return state.wallets.find(w=>w.id===id)?.name || 'Кошелёк'; }
 function isWalletTx(t,w) { return t.walletId===w.id || (t.type==='transfer' && t.toWalletId===w.id); }
+function benefit(t) { return t.type==='expense' ? Math.min(t.amountMinor, Math.max(0,Number.isSafeInteger(t.cashbackMinor)?t.cashbackMinor:0)) : 0; }
+function netExpense(t) { return Math.max(0,t.amountMinor-benefit(t)); }
+function cashbackTotals(rows,w) { const expenses=rows.filter(t=>t.type==='expense'&&t.walletId===w.id); return {gross:expenses.reduce((s,t)=>s+t.amountMinor,0), cashback:expenses.reduce((s,t)=>s+benefit(t),0),count:expenses.filter(t=>benefit(t)>0).length}; }
+function settledCashback(t,dateEnd) {return t.type==='expense'&&t.cashbackStatus==='received'&&(t.cashbackDate||t.date)<=dateEnd?benefit(t):0;}
 function txDelta(t,w) {
   if (t.type==='income' && t.walletId===w.id) return t.amountMinor;
-  if (t.type==='expense' && t.walletId===w.id) return -t.amountMinor;
+  if (t.type==='expense' && t.walletId===w.id) return -netExpense(t);
   if (t.type==='transfer') return (t.toWalletId===w.id ? (t.toAmountMinor ?? t.amountMinor) : 0) - (t.walletId===w.id ? t.amountMinor : 0);
   return 0;
 }
-function balance(w, dateEnd='9999-12-31') { return (w.initialBalanceMinor||0) + state.transactions.filter(t=>t.date<=dateEnd).reduce((sum,t)=>sum+txDelta(t,w),0); }
+function balance(w, dateEnd=today()) {
+ return (w.initialBalanceMinor||0)+state.transactions.reduce((sum,t)=>{
+   if(t.type==='expense'&&t.walletId===w.id) return sum-(t.date<=dateEnd?t.amountMinor:0)+settledCashback(t,dateEnd);
+   return sum+(t.date<=dateEnd?txDelta(t,w):0);
+ },0);
+}
 function filteredByPeriod(w) { const start=datePeriod(); const end=state.period==='month'?state.focusMonth+'-31':today();return state.transactions.filter(t=>isWalletTx(t,w)&&(!start||t.date>=start)&&t.date<=end); }
-function sumType(rows,type,w) { return rows.filter(t=>t.type===type && t.walletId===w.id).reduce((s,t)=>s+t.amountMinor,0); }
+function sumType(rows,type,w) { return rows.filter(t=>t.type===type && t.walletId===w.id).reduce((s,t)=>s+(type==='expense'?netExpense(t):t.amountMinor),0); }
 function sortTx(a,b){ return b.date.localeCompare(a.date) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')); }
 const opt=(value,label,selected)=>`<option value="${esc(value)}" ${selected?'selected':''}>${esc(label)}</option>`;
 function categoryOptions(type, selected='', allowAll=false){
@@ -102,10 +111,11 @@ function groupedOperations(items,w,maxItems=100){
     const dayContent=dayRows.map(t=>{
       const amount=txDelta(t,w),name=t.type==='transfer'?`Перевод · ${walletName(t.toWalletId||t.walletId)}`:cat(t.categoryId)?.name||'Без категории';
       const detail=String(t.note||'').trim();
+      const cash=benefit(t), cashbackNote=cash>0?`<span class="operation-cashback">Кешбэк +${esc(format(cash,w.currency))} · ${t.cashbackStatus==='received'?'получен':'ожидается'}</span>`:'';
       const symbol=t.type==='income'?'up':t.type==='expense'?'down':'transfer';
       return `<button class="activity-operation" data-action="edit-tx" data-id="${esc(t.id)}" aria-label="Изменить: ${esc(name)}, ${esc(format(amount,w.currency))}">
         <span class="operation-icon ${esc(t.type)}">${svgIcon(symbol)}</span>
-        <span class="operation-text"><span class="operation-name">${esc(name)}</span>${detail?`<span class="operation-note">${esc(detail)}</span>`:''}</span>
+        <span class="operation-text"><span class="operation-name">${esc(name)}</span>${detail?`<span class="operation-note">${esc(detail)}</span>`:''}${cashbackNote}</span>
         <span class="operation-money ${amount>=0?'positive':'negative'}">${esc(format(amount,w.currency))}</span>
       </button>`;
     }).join('');
@@ -116,17 +126,19 @@ function renderDashboard(){
   const w=wallet(),month=state.focusMonth,{income,expense}=monthlyTotals(w,month),net=income-expense;
   const recent=state.transactions.filter(t=>isWalletTx(t,w)&&t.date<=today()).sort(sortTx).slice(0,16);
   const todaySpent=sumType(state.transactions.filter(t=>t.date===today()),'expense',w);
+  const todayCashback=cashbackTotals(state.transactions.filter(t=>t.date===today()),w).cashback;
+  const monthlyCashback=cashbackTotals(state.transactions.filter(t=>t.date.startsWith(month)),w).cashback;
   const nextAvailable=month<today().slice(0,7);
   return `<div class="home-screen">
     <section class="home-summary" aria-label="Денежный поток за ${esc(monthTitle(month))}">
       <div class="hero-main"><div class="net-title"><div class="net-number">${esc(format(net,w.currency))}</div><div class="net-caption">Денежный поток · ${esc(monthTitle(month,true))}</div></div>
       <div class="flow-totals"><span class="inflow">${svgIcon('up')} ${esc(format(income,w.currency))}</span><span class="outflow">${svgIcon('down')} ${esc(format(expense,w.currency))}</span></div></div>
-      <div class="chart-wrap">${cashFlowChart(w)}</div>
+      <div class="home-cashback">🎁 Выгода от кешбэка: <strong>${esc(format(monthlyCashback,w.currency))}</strong></div><div class="chart-wrap">${cashFlowChart(w)}</div>
       <div class="month-navigation"><button data-action="prev-month" aria-label="Предыдущий месяц">${svgIcon('chevron','flip')}<span>${esc(monthTitle(moveMonth(month,-1)))}</span></button>
       <button class="selected-month" data-action="current-month" title="Вернуться к текущему месяцу">${esc(monthTitle(month,true))}${month===today().slice(0,7)?'<span class="now-badge">Этот месяц</span>':''}</button>
       <button data-action="next-month" aria-label="Следующий месяц" ${nextAvailable?'':'disabled'}><span>${nextAvailable?esc(monthTitle(moveMonth(month,1))):' '}</span>${svgIcon('chevron')}</button></div>
     </section>
-    <div class="home-quick"><button class="quick-scan" data-action="scan-expense">${svgIcon('camera')} Добавить расход по скриншоту</button><span class="daily-spent">Сегодня потрачено: ${esc(format(todaySpent,w.currency))}</span></div>
+    <div class="home-quick"><button class="quick-scan" data-action="scan-expense">${svgIcon('camera')} Добавить расход по скриншоту</button><span class="daily-spent">Сегодня потрачено: ${esc(format(todaySpent,w.currency))}${todayCashback?` · кешбэк +${esc(format(todayCashback,w.currency))}`:''}</span></div>
     <section class="home-activity"><div class="activity-heading"><h2>Последние операции</h2><button data-action="show-transactions">Все операции ${svgIcon('chevron')}</button></div>${groupedOperations(recent,w,16)}</section>
     <div class="data-footnote">${state.transactions.length?`В базе ${state.transactions.length.toLocaleString('ru-RU')} операций`:'История Spendee загружается в разделе «Больше»'} · данные сохраняются в браузере</div>
   </div>`;
@@ -139,10 +151,13 @@ function renderAccounts(){
   </div>`;
 }
 function renderOverview(){
- const w=wallet(),rows=filteredByPeriod(w),income=sumType(rows,'income',w),expense=sumType(rows,'expense',w);
+ const w=wallet(),rows=filteredByPeriod(w),income=sumType(rows,'income',w),expense=sumType(rows,'expense',w),cb=cashbackTotals(rows,w);
  return `<div class="page-section"><div class="section-title"><h2>Финансовый обзор</h2><select id="period-picker" aria-label="Период">${opt('month','Выбранный месяц',state.period==='month')}${opt('year','Этот год',state.period==='year')}${opt('all','Вся история',state.period==='all')}</select></div>
  <div class="overview-month-hint">${state.period==='month'?esc(monthTitle(state.focusMonth,true)):state.period==='year'?'С начала года':'За весь период'} · ${rows.length.toLocaleString('ru-RU')} операций</div>
  <div class="stats"><div class="panel stat"><div class="label">Доходы</div><strong class="positive">+${esc(format(income,w.currency))}</strong></div><div class="panel stat"><div class="label">Расходы</div><strong class="negative">−${esc(format(expense,w.currency))}</strong></div><div class="panel stat"><div class="label">Разница</div><strong>${money(income-expense,w.currency)}</strong></div></div>
+ <section class="panel cashback-overview"><div class="panel-header"><h2>Выгода от кешбэка</h2><span class="tiny muted">${cb.count} покупок</span></div>
+ <div class="cashback-summary"><strong class="positive">+${esc(format(cb.cashback,w.currency))}</strong><span class="tiny muted">Покупки до кешбэка: ${esc(format(cb.gross,w.currency))}</span><span class="tiny muted">Фактические расходы: ${esc(format(expense,w.currency))}</span></div>
+ <p class="tiny muted">Кешбэк уменьшает расходы в статистике, но не добавляется к доходам. Реальный баланс счёта обновится после отметки «Получен».</p></section>
  <div class="dash-columns"><section class="panel section-gap"><div class="panel-header"><h2>Доходы по категориям</h2><span class="tiny muted">Топ-7</span></div>${categoriesBar(rows,'income',w)}</section>
  <section class="panel section-gap"><div class="panel-header"><h2>Расходы по категориям</h2><span class="tiny muted">Топ-7</span></div>${categoriesBar(rows,'expense',w)}</section></div>
  <section class="panel section-gap"><div class="panel-header"><h2>История</h2><button data-action="show-transactions" class="btn small">Показать операции</button></div><p class="tiny muted">Подробный поиск и фильтры доступны в истории операций.</p></section>
@@ -150,7 +165,7 @@ function renderOverview(){
 }
 function categoriesBar(rows,type,w){
   const sums=new Map();
-  rows.filter(t=>t.type===type&&t.walletId===w.id).forEach(t=>sums.set(t.categoryId,(sums.get(t.categoryId)||0)+t.amountMinor));
+  rows.filter(t=>t.type===type&&t.walletId===w.id).forEach(t=>sums.set(t.categoryId,(sums.get(t.categoryId)||0)+(type==='expense'?netExpense(t):t.amountMinor)));
   const sorted=[...sums].sort((a,b)=>b[1]-a[1]).slice(0,7);
   if(!sorted.length)return '<div class="empty">Пока нет операций за выбранный период</div>';
   const max=sorted[0][1]||1;
@@ -181,7 +196,7 @@ function renderBudgets(){
   const w=wallet(),currentMonth=today().slice(0,7),relevant=state.budgets.filter(b=>b.walletId===w.id);
   return `<section class="panel section-gap"><div class="panel-header"><div><h2>Лимиты расходов</h2><p class="tiny muted" style="margin:7px 0 0">Текущий месяц · ${esc(w.name)}</p></div><button class="btn primary small" data-action="add-budget">+ Бюджет</button></div>
   ${relevant.length?relevant.map(b=>{
-    const used=state.transactions.filter(t=>t.walletId===w.id&&t.type==='expense'&&t.date.startsWith(currentMonth)&&(!b.categoryId||t.categoryId===b.categoryId)).reduce((s,t)=>s+t.amountMinor,0);
+    const used=state.transactions.filter(t=>t.walletId===w.id&&t.type==='expense'&&t.date.startsWith(currentMonth)&&(!b.categoryId||t.categoryId===b.categoryId)).reduce((s,t)=>s+netExpense(t),0);
     const ratio=used/b.limitMinor;
     return `<div class="budget-item"><div class="bar-line"><span>${esc(b.name)}</span><span>${Math.round(ratio*100)}%</span></div>
     <div class="tiny muted" style="margin:8px 0 12px">${esc(format(used,w.currency))} из ${esc(format(b.limitMinor,w.currency))} · ${esc(cat(b.categoryId)?.name||'Все расходы')}</div>
@@ -191,9 +206,9 @@ function renderSettings(){
  const w=wallet();const income=state.categories.filter(c=>c.type==='income').length,expense=state.categories.filter(c=>c.type==='expense').length;
  return `<div class="grid-two"><section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><p class="tiny muted">История хранится только в этом браузере. Для переноса на другой телефон скачайте резервную копию JSON внизу.</p><button class="btn" data-action="go-accounts">Перейти к счетам</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
  <section class="panel"><div class="panel-header"><h2>Категории</h2><button class="btn small" data-action="add-category">+ Категория</button></div><p class="tiny muted">${income} доходных · ${expense} расходных. Можно импортировать локальный справочник из HTML Spendee.</p>
- <label class="field tiny" style="margin-bottom:12px">Загрузить категории из JSON<input type="file" id="categories-seed-file" accept=".json,application/json"/></label><input id="category-search" type="search" placeholder="Поиск категории" style="width:100%;margin-bottom:12px"/><div class="category-list" id="category-list">${categoryList('')}</div></section>
+ <label class="field tiny" style="margin-bottom:12px">Загрузить только категории (JSON-массив, не полную историю)<input type="file" id="categories-seed-file" accept=".json,application/json"/></label><input id="category-search" type="search" placeholder="Поиск категории" style="width:100%;margin-bottom:12px"/><div class="category-list" id="category-list">${categoryList('')}</div></section>
  <section class="panel"><div class="panel-header"><h2>Импорт из Spendee</h2></div><div class="setting-block"><p class="muted tiny">Экспортируйте историю в CSV через мобильный Spendee. Затем выберите файл здесь: данные обработаются прямо в браузере.</p><input type="file" id="csv-file" accept=".csv,text/csv,text/plain"/><div class="hint">Импорт поддерживает CSV с разделителями запятая / точка с запятой / табуляция. Дату, сумму, категорию и другие поля можно сопоставить вручную. XLS пока не поддерживается.</div></div></section>
- <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><p class="muted tiny">Все записи находятся в IndexedDB браузера. Очистка данных сайта может удалить историю — регулярно сохраняйте резервные копии.</p><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button><label class="field">Восстановить из JSON<input type="file" id="restore-file" accept="application/json,.json"/></label><div class="hint">Восстановление полностью заменит текущую базу данных. Копия JSON не зашифрована — храните её в безопасном месте.</div></div></section>
+ <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><p class="muted tiny">Все записи находятся в IndexedDB браузера. Очистка данных сайта может удалить историю — регулярно сохраняйте резервные копии.</p><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button><label class="field">Восстановить полную базу из JSON (включая операции Spendee)<input type="file" id="restore-file" accept="application/json,.json"/></label><div class="hint">Восстановление полностью заменит текущую базу данных. Копия JSON не зашифрована — храните её в безопасном месте.</div></div></section>
  </div><p class="tiny muted" style="margin-top:20px">Первая версия: без облачной синхронизации, банковских подключений и автоматических повторений. Для установки как PWA нужен HTTPS или localhost.</p>`;
 }
 function categoryList(query){
@@ -205,6 +220,43 @@ function openModal(title,body){$('#modal-root').innerHTML=`<div class="modal-bac
 function closeModal(){$('#modal-root').innerHTML='';}
 function field(title,html,wide=false){return `<label class="field ${wide?'wide':''}">${esc(title)}${html}</label>`;}
 let editingType='expense';
+function cashbackFields(t){
+ const cashback=benefit(t||{}), status=t?.cashbackStatus==='received'?'received':'expected';
+ return `<div class="cashback-fields wide" id="tx-cashback-wrap">
+   <div class="cashback-heading">🎁 Кешбэк с покупки</div>
+   <p class="tiny muted">Укажите процент или сумму. Расходы и бюджеты считаются за вычетом кешбэка.</p>
+   <div class="cashback-inputs">
+     ${field('Кешбэк, %',`<input type="number" name="cashbackPercent" min="0" max="100" step="0.01" inputmode="decimal" value="${t?.amountMinor&&cashback?+(cashback/t.amountMinor*100).toFixed(2):0}">`)}
+     ${field('Кешбэк, сумма',`<input type="number" name="cashbackAmount" min="0" step="0.01" inputmode="decimal" value="${(cashback/100).toFixed(2)}">`)}
+   </div>
+   <div class="cashback-preview" id="cashback-preview">Расход после кешбэка: —</div>
+   ${field('Начисление кешбэка',`<select name="cashbackStatus"><option value="expected" ${status==='expected'?'selected':''}>Ожидается</option><option value="received" ${status==='received'?'selected':''}>Получен</option></select>`)}
+   ${field('Дата получения (если начислен)',`<input type="date" name="cashbackDate" value="${esc(t?.cashbackDate||t?.date||today())}">`)}
+   <p class="tiny muted">До получения кешбэка реальный баланс счёта уменьшается на полную стоимость покупки.</p>
+ </div>`;
+}
+function updateCashbackPreview(form, source='amount'){
+ if(!form)return;
+ const gross=Math.round(Number(form.elements.amount?.value||0)*100),pct=form.elements.cashbackPercent,amount=form.elements.cashbackAmount;
+ if(!pct||!amount)return;
+ if(source==='percent'||source==='gross'||source==='cashbackAmount'){
+  if(source==='percent'||source==='gross')amount.value=(Math.round(gross*Math.max(0,Number(pct.value||0))/100)/100).toFixed(2);
+  else if(source==='cashbackAmount'&&gross>0)pct.value=(Math.max(0,Number(amount.value||0))*10000/gross).toFixed(2);
+ }
+ const cashback=Math.round(Number(amount.value||0)*100),preview=form.querySelector('#cashback-preview');
+ if(preview)preview.textContent=`Расход после кешбэка: ${format(Math.max(0,gross-cashback),state.wallets.find(w=>w.id===form.elements.wallet?.value)?.currency||'RUB')} · выгода ${format(cashback)}`;
+}
+function cashbackFormData(form,gross){
+ const cashback=Math.round(Number(form.elements.cashbackAmount?.value||0)*100);
+ if(!Number.isSafeInteger(cashback)||cashback<0||cashback>gross)return null;
+ const cashbackStatus=String(form.elements.cashbackStatus?.value||'expected');
+ const cashbackDate=String(form.elements.cashbackDate?.value||'');
+ const purchaseDate=String(form.elements.date?.value||'');
+ if(cashbackStatus==='received'&&cashback>0&&cashbackDate<purchaseDate)return null;
+ if(cashbackStatus==='received'&&cashback>0&&!parseDate(cashbackDate))return null;
+ return {cashbackMinor:cashback,cashbackStatus:cashback>0?cashbackStatus:'expected',cashbackDate:cashback>0&&cashbackStatus==='received'?cashbackDate:null};
+}
+
 function openTransaction(id,preferredType='expense'){
  const t=state.transactions.find(x=>x.id===id);editingType=t?.type||preferredType;
  const w=state.wallets.find(x=>x.id===t?.walletId)||wallet();
@@ -212,6 +264,7 @@ function openTransaction(id,preferredType='expense'){
  <div class="form-grid">${field('Сумма',`<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" value="${t?esc((t.amountMinor/100).toFixed(2)):''}" placeholder="0,00" required>`) }
  ${field('Дата',`<input name="date" type="date" value="${esc(t?.date||today())}" required>`) }
  ${field('Кошелёк',`<select name="wallet">${walletOptions(w.id)}</select>`) }
+ ${cashbackFields(t)}
  <div id="tx-category-wrap">${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions(editingType,t?.categoryId||'')}</select>`)}</div>
  <div class="field wide ${editingType==='transfer'?'':'hidden'}" id="tx-destination">${field('В какой кошелёк',`<select name="toWallet"><option value="">Выберите</option>${walletOptions(t?.toWalletId||'', x=>x.id!==w.id&&x.currency===w.currency)}</select>`)}</div>
  ${field('Заметка',`<input name="note" maxlength="500" value="${esc(t?.note||'')}" placeholder="Необязательно">`,true)}
@@ -219,11 +272,13 @@ function openTransaction(id,preferredType='expense'){
  <div class="modal-actions">${t?`<button type="button" class="btn danger" data-action="delete-tx" data-id="${esc(t.id)}">Удалить</button>`:''}<button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div></form>`;
  openModal(t?'Изменить операцию':'Новая операция',body);
  if(editingType==='transfer') updateTransactionType();
+ updateCashbackPreview($('#tx-form'),'init');
 }
 function updateTransactionType(){
  document.querySelectorAll('.type-tab').forEach(b=>b.classList.toggle('active',b.dataset.type===editingType));
  const wrap=$('#tx-category-wrap'),dest=$('#tx-destination');if(!wrap)return;
  wrap.classList.toggle('hidden',editingType==='transfer');dest.classList.toggle('hidden',editingType!=='transfer');
+ const cb=$('#tx-cashback-wrap');if(cb)cb.classList.toggle('hidden',editingType!=='expense');
  const old=wrap.querySelector('select');if(old)old.innerHTML=`<option value="">Без категории</option>`+categoryOptions(editingType);
 }
 function openQuickAdd(){
@@ -241,7 +296,8 @@ function openScreenshotExpense(){
  <div id="ocr-status" class="hint" style="margin-top:12px">Выберите изображение. Для первой загрузки OCR нужен интернет.</div>
  <form id="ocr-expense-form" class="hidden" style="margin-top:17px">
  <div class="form-grid">
- ${field('Сумма расхода',`<input required name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">`)}
+ ${field('Стоимость покупки',`<input required name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">`)}
+ ${cashbackFields(null)}
  ${field('Дата',`<input required name="date" type="date" value="${today()}">`)}
  ${field('Кошелёк',`<select name="wallet">${walletOptions(w.id)}</select>`)}
  ${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions('expense')}</select>`)}
@@ -266,7 +322,7 @@ async function scanExpenseImage(file){
   f.elements.note.value=parsed.merchant.slice(0,500);
   $('#ocr-raw').textContent=raw||'(Текст не обнаружен)';
   status.textContent=parsed.amount?'Нашли возможную сумму. Обязательно проверьте распознанные данные.':'Сумма не найдена. Введите её вручную, сверившись со скриншотом.';
-  f.classList.remove('hidden');
+  f.classList.remove('hidden');updateCashbackPreview(f,'percent');
  }catch(e){if(status.isConnected)status.textContent='Ошибка распознавания: '+e.message+' Попробуйте другое изображение или добавьте расход вручную.';}
 }
 async function submitOcrExpense(form){
@@ -275,10 +331,11 @@ async function submitOcrExpense(form){
  const date=String(data.get('date'));
  if(!Number.isSafeInteger(amount)||amount<=0||!w||!parseDate(date))return toast('Проверьте сумму, дату и кошелёк.');
  const note=cleanName(data.get('note'));
+ const cashback=cashbackFormData(form,amount);if(!cashback)return toast('Кешбэк не может быть больше стоимости покупки. Проверьте сумму и дату получения.');
  // A soft warning prevents accidental duplicates without blocking valid repeated purchases.
  const duplicate=state.transactions.some(t=>t.type==='expense'&&t.walletId===w.id&&t.date===date&&t.amountMinor===amount&&cleanName(t.note).toLowerCase()===note.toLowerCase());
  if(duplicate&&!confirm('Очень похожий расход уже есть. Сохранить ещё один?'))return;
- await save('transactions',{id:uid(),type:'expense',walletId:w.id,toWalletId:null,amountMinor:amount,toAmountMinor:null,date,categoryId:String(data.get('category')||'')||null,note,labels:['скриншот'],createdAt:new Date().toISOString()});
+ await save('transactions',{id:uid(),type:'expense',walletId:w.id,toWalletId:null,amountMinor:amount,...cashback,toAmountMinor:null,date,categoryId:String(data.get('category')||'')||null,note,labels:['скриншот'],createdAt:new Date().toISOString()});
  await loadData();closeModal();render();toast('Расход добавлен в статистику.');
 }
 
@@ -316,7 +373,9 @@ async function submitTransaction(form){
  if(!parseDate(date))return toast('Неверная дата.');
  const dest=state.wallets.find(x=>x.id===data.get('toWallet'));
  if(editingType==='transfer'&&(!dest||dest.id===w.id||dest.currency!==w.currency))return toast('Для перевода выберите другой кошелёк в той же валюте.');
- const item={...existing,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString()};
+ const cashback=editingType==='expense'?cashbackFormData(form,amount):{cashbackMinor:0,cashbackStatus:'expected',cashbackDate:null};
+ if(!cashback)return toast('Кешбэк должен быть от 0 до 100% стоимости покупки. Проверьте дату получения.');
+ const item={...existing,...cashback,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString()};
  await save('transactions',item);await loadData();closeModal();render();toast('Операция сохранена.');
 }
 async function submitBudget(form){
@@ -345,10 +404,10 @@ function backupJSON(){
  download(JSON.stringify(data,null,2),`moy-koshelek-backup-${today()}.json`,'application/json;charset=utf-8');
 }
 function exportCSV(){
- const rows=[['Date','Type','Amount','Currency','Wallet','To wallet','Category','Note','Labels']];
+ const rows=[['Date','Type','Amount','Currency','Wallet','To wallet','Category','Note','Labels','Cashback','Cashback status','Cashback date','Net expense']];
  for(const t of [...state.transactions].sort(sortTx)){
    const w=state.wallets.find(x=>x.id===t.walletId);
-   rows.push([t.date,t.type,((t.type==='expense'?-1:1)*t.amountMinor/100).toFixed(2),w?.currency||'RUB',w?.name||'',t.toWalletId?walletName(t.toWalletId):'',cat(t.categoryId)?.name||'',t.note,(t.labels||[]).join(', ')]);
+   rows.push([t.date,t.type,((t.type==='expense'?-1:1)*t.amountMinor/100).toFixed(2),w?.currency||'RUB',w?.name||'',t.toWalletId?walletName(t.toWalletId):'',cat(t.categoryId)?.name||'',t.note,(t.labels||[]).join(', '),(benefit(t)/100).toFixed(2),t.cashbackStatus||'',t.cashbackDate||'',(t.type==='expense'?netExpense(t)/100:0).toFixed(2)]);
  }
  download('\uFEFF'+rows.map(r=>r.map(csvEscape).join(';')).join('\r\n'),`moy-koshelek-${today()}.csv`,'text/csv;charset=utf-8');
 }
@@ -468,7 +527,8 @@ function bind(){
   if(id==='categories-seed-file'&&el.files?.[0]){
    try{
     const imported=JSON.parse(await el.files[0].text());
-    if(!Array.isArray(imported)||imported.some(c=>typeof c.name!=='string'||!['income','expense'].includes(c.type))) throw Error('Неправильный список категорий.');
+    if(imported && !Array.isArray(imported) && Array.isArray(imported.transactions) && Array.isArray(imported.categories)) throw Error('Вы выбрали полную резервную копию. Для неё используйте «Больше → Резервная копия → Восстановить из JSON».');
+    if(!Array.isArray(imported)||imported.some(c=>typeof c.name!=='string'||!['income','expense'].includes(c.type))) throw Error('Неправильный список категорий. Выберите JSON-массив категорий.');
     const current=new Set(state.categories.map(c=>c.type+'|'+c.name.toLocaleLowerCase('ru')));
     const unique=[];
     for(const c of imported){
@@ -482,11 +542,17 @@ function bind(){
    el.value='';return;
   }
   if(el.name==='wallet' && el.closest('#tx-form')){
+   updateCashbackPreview(el.closest('#tx-form'),'init');
    const form=el.closest('form');const current=state.wallets.find(w=>w.id===el.value);
    const t=form.querySelector('[name=toWallet]');if(t)t.innerHTML='<option value="">Выберите</option>'+walletOptions('',w=>w.id!==current?.id&&w.currency===current?.currency);
   }
  });
  document.addEventListener('input',e=>{
+  const cbForm=e.target.closest('#tx-form,#ocr-expense-form');
+  if(cbForm && ['amount','cashbackPercent','cashbackAmount'].includes(e.target.name)){
+   updateCashbackPreview(cbForm,e.target.name==='amount'?'gross':e.target.name==='cashbackPercent'?'percent':'cashbackAmount');
+  }
+
   if(e.target.id==='tx-search'){state.txFilters.search=e.target.value;state.maxTx=100;$('#global-search').value=e.target.value;$('#tx-list').innerHTML=transactionList();}
   if(e.target.id==='global-search'){state.txFilters.search=e.target.value;state.maxTx=100;if(state.page!=='transactions')setPage('transactions');else $('#tx-list').innerHTML=transactionList();}
   if(e.target.id==='category-search'){$('#category-list').innerHTML=categoryList(e.target.value);}

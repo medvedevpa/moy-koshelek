@@ -114,3 +114,16 @@ body{background:var(--soft);-webkit-tap-highlight-color:transparent}
 }
 @media (max-width:380px){.flow-totals{width:100%;justify-content:flex-start;margin-top:4px}.month-navigation button{font-size:10px}.month-navigation .selected-month{min-width:120px}.operation-name{font-size:14px}.operation-money{font-size:14px}.operation-icon{width:43px;height:43px}.quick-scan{font-size:11px}.activity-operation{padding:12px}}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation-duration:0s!important;transition-duration:0s!important}}
+
+/* Cashback: gross purchase, benefit and net expense */
+.cashback-fields{border:1px solid #cfe8dc;border-radius:16px;padding:15px;background:#f1faf5;display:grid;gap:10px}
+.cashback-heading{font-size:16px;font-weight:750;color:#236c50}
+.cashback-fields p{margin:0;line-height:1.4}
+.cashback-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cashback-preview{font-weight:750;color:#185f48;background:white;border-radius:10px;padding:12px;line-height:1.4}
+.operation-cashback{display:block;color:#26936a;font-size:12px;margin-top:3px;font-weight:650}
+.cashback-overview{margin-bottom:16px}
+.cashback-summary{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:baseline;margin-bottom:13px}
+.cashback-summary strong{font-size:26px}
+.home-cashback{padding:3px 20px 0;color:#248b62;font-size:13px}
+@media(max-width:480px){.cashback-inputs{gap:8px}.cashback-fields{padding:12px}.cashback-summary{display:grid;gap:8px}}

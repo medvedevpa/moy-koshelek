@@ -1,4 +1,4 @@
-const CACHE = 'moy-koshelek-app-v3';
+const CACHE = 'moy-koshelek-app-v5';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './db.js', './import.js', './ocr.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
