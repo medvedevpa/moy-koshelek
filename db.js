@@ -1,5 +1,5 @@
 const DB_NAME = 'my-wallet-pwa-v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 export function openDB() {
@@ -10,6 +10,7 @@ export function openDB() {
       for (const name of ['wallets', 'categories', 'transactions', 'budgets']) {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
       }
+      for (const name of ['cloud_meta', 'cloud_pending']) {if (!db.objectStoreNames.contains(name)) db.createObjectStore(name,{keyPath:'key'});}
       const tx = req.transaction.objectStore('transactions');
       if (!tx.indexNames.contains('sourceKey')) tx.createIndex('sourceKey', 'sourceKey', { unique: false });
     };
@@ -28,12 +29,13 @@ export async function getAll(storeName) {
   });
 }
 
+function changed(type,id,payload,deleted=false){if(['wallets','categories','transactions','budgets'].includes(type))window.dispatchEvent(new CustomEvent('wallet-local-change',{detail:{type,id,payload,deleted}}))}
 export async function save(storeName, item) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     tx.objectStore(storeName).put(item);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {changed(storeName,item.id,item);resolve();};
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -42,7 +44,7 @@ export async function remove(storeName, id) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     tx.objectStore(storeName).delete(id);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {changed(storeName,id,null,true);resolve();};
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -56,7 +58,7 @@ export async function insertMany(storeName, items) {
       const tx = db.transaction(storeName, 'readwrite');
       const obj = tx.objectStore(storeName);
       for (const item of batch) obj.put(item);
-      tx.oncomplete = resolve;
+      tx.oncomplete = () => {for(const x of batch)changed(storeName,x.id,x);resolve();};
       tx.onerror = () => reject(tx.error);
     });
   }

@@ -1,5 +1,5 @@
-const CACHE = 'moy-koshelek-app-v5';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './db.js', './import.js', './ocr.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'moy-koshelek-app-v9-tatnet';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './cloud.js', './db.js', './import.js', './ocr.js', './data-import.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
@@ -8,5 +8,14 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
+  // Обновления GitHub Pages: показываем свежий index.html при наличии интернета.
+  if(event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).then(response => {
+      const copy=response.clone();
+      if(response.ok) caches.open(CACHE).then(c => c.put(event.request,copy)).catch(()=>{});
+      return response;
+    }).catch(() => caches.match(event.request).then(cached => cached || caches.match('./index.html'))));
+    return;
+  }
   event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
 });
