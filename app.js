@@ -249,41 +249,38 @@ function renderBudgets(){
 }
 function renderCloudPanel(){
  const c=cloud.status();
- const error=c.lastError?`<div class="hint cloud-warn">${esc(c.lastError)}. Локальные записи сохранены.</div>`:'';
- const header=`<section class="panel cloud-panel"><div class="panel-header"><h2>☁️ Семейная синхронизация TatNet</h2></div>${error}`;
- if(!c.signedIn)return `${header}<p class="tiny muted">Войди со своей почтой и паролем TatNet Supabase (это новый аккаунт для приложения, не пароль Studio).</p>
- <form id="cloud-auth-form" class="form-grid"><label class="field">Почта<input type="email" name="email" autocomplete="username" required></label><label class="field">Пароль<input type="password" name="password" autocomplete="current-password" minlength="6" required></label>
- <div class="cloud-actions"><button class="btn primary" type="submit" name="cloudMode" value="login">Войти</button><button class="btn" type="submit" name="cloudMode" value="register">Зарегистрироваться</button></div></form><p class="tiny muted">Публичный ключ подключения уже добавлен; секретные ключи не нужны.</p></section>`;
- if(!c.family)return `${header}<p class="tiny muted">Аккаунт: <b>${esc(c.email)}</b>. Создай семью на первом телефоне или присоединись на втором по коду.</p>
- <div class="cloud-actions"><button class="btn" data-action="cloud-list-families">Мои семьи</button><button class="btn" data-action="cloud-logout">Выйти</button></div>
- <form id="cloud-create-form" class="form-grid cloud-subform"><label class="field">Название семьи<input name="familyName" value="Наша семья" required maxlength="100"></label><button class="btn primary" type="submit">Создать семейный бюджет</button></form>
- <form id="cloud-join-form" class="form-grid cloud-subform"><label class="field">Код приглашения от супруга<input name="invite" placeholder="48 символов" minlength="48" maxlength="48" required></label><button class="btn" type="submit">Присоединиться к семье</button></form></section>`;
- return `${header}<p class="tiny muted">Аккаунт: <b>${esc(c.email)}</b></p><p class="tiny muted">Семья: ${esc(c.family.slice(0,8))}… · ${c.active?'<strong>синхронизация включена</strong>':'<strong>ожидает первого подключения</strong>'}${c.busy?' · выполняется обмен':''}</p>
- <div class="cloud-actions"><button class="btn" data-action="cloud-invite">Новый код для жены</button><button class="btn" data-action="cloud-logout">Выйти</button></div>
- ${c.active?`<p class="tiny muted">Новые операции сохраняются на телефоне и отправляются в облако. При открытом приложении проверка обновлений примерно раз в 30 секунд. При конфликте изменение не перезаписывается автоматически.</p><button class="btn primary" data-action="cloud-sync" ${c.busy?'disabled':''}>Синхронизировать сейчас</button>`:
- `<div class="hint">ПЕРВЫЙ ТЕЛЕФОН: сначала сделай JSON-копию ниже, затем нажми «Загрузить мою историю в TatNet».<br>ВТОРОЙ ТЕЛЕФОН: после входа и присоединения сделай копию данных телефона и выбери «Скачать семейную историю».</div>
- <div class="cloud-actions"><button class="btn primary" data-action="cloud-upload">Загрузить мою историю в TatNet</button><button class="btn" data-action="cloud-download">Скачать семейную историю</button></div>`}
+ const error=c.lastError?`<div class="cloud-error" role="alert">${esc(c.lastError)}</div>`:'';
+ const header=`<section class="panel cloud-panel"><div class="panel-header"><h2>Семейный аккаунт</h2><span class="sync-status ${c.active?'sync-on':'sync-off'}">${c.active?'● Подключён':'○ Не синхронизируется'}</span></div>${error}`;
+ if(!c.signedIn)return `${header}
+ <form id="cloud-auth-form" class="form-grid"><label class="field">Электронная почта<input type="email" name="email" autocomplete="username" required></label><label class="field">Пароль<input type="password" name="password" autocomplete="current-password" minlength="6" required></label>
+ <div class="cloud-actions"><button class="btn primary" type="submit" name="cloudMode" value="login">Войти</button><button class="btn" type="submit" name="cloudMode" value="register">Регистрация</button></div></form></section>`;
+ if(!c.family)return `${header}<div class="cloud-account-row"><span>${esc(c.email)}</span><button class="btn small" data-action="cloud-logout">Выйти</button></div>
+ <div class="cloud-actions"><button class="btn primary" data-action="cloud-list-families">Открыть семейный бюджет</button></div>
+ <form id="cloud-create-form" class="form-grid cloud-subform"><label class="field">Название семьи<input name="familyName" value="Наша семья" required maxlength="100"></label><button class="btn" type="submit">Создать семью</button></form>
+ <form id="cloud-join-form" class="form-grid cloud-subform"><label class="field">Код приглашения<input name="invite" minlength="48" maxlength="48" required></label><button class="btn" type="submit">Присоединиться</button></form></section>`;
+ return `${header}<div class="cloud-account-row"><span>${esc(c.email)}</span><button class="btn small" data-action="cloud-logout">Выйти</button></div>
+ ${c.active?
+ `<div class="cloud-actions"><button class="btn primary" data-action="cloud-sync" ${c.busy?'disabled':''}>${c.busy?'Обновляем…':'Обновить данные'}</button><button class="btn" data-action="cloud-invite">Пригласить жену</button></div>${c.lastSyncAt?`<p class="cloud-timestamp">Последняя проверка: ${new Date(c.lastSyncAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</p>`:''}`:
+ `<p class="cloud-notice">Вход выполнен, но обмен между устройствами пока не включён.</p>
+ <div class="cloud-actions"><button class="btn primary" data-action="cloud-start">Включить синхронизацию</button><button class="btn" data-action="cloud-invite">Пригласить жену</button></div>`}
  </section>`;
 }
 function renderSettings(){
  const w=wallet();const income=state.categories.filter(c=>c.type==='income').length,expense=state.categories.filter(c=>c.type==='expense').length;
  return `${renderCloudPanel()}<section class="panel section-gap import-main"><div class="panel-header"><h2>📥 Импортировать мои данные</h2></div>
- <p class="muted">Одна кнопка для всей истории Spendee, категорий и операций CSV. Приложение само определит тип файла.</p>
+
  <label class="field" for="data-import-file">Выбрать файл с телефона или компьютера
  <input type="file" id="data-import-file" accept=".json,.csv,application/json,text/csv,text/plain" aria-describedby="data-import-help" /></label>
- <div class="hint" id="data-import-help"><strong>Полная история JSON:</strong> восстановит счета, категории и все операции после подтверждения — заменит текущую базу.<br>
- <strong>CSV из Spendee:</strong> откроет мастер импорта операций.<br>
- <strong>JSON-список категорий:</strong> добавит только недостающие категории, не затрагивая операции.</div>
- <p class="tiny muted" style="margin-bottom:0">Файл с личной историей загружайте здесь, но <strong>не публикуйте его на GitHub</strong>. Перед полной заменой сохраните текущую резервную копию ниже.</p>
+
  </section>
- <div class="grid-two"><section class="panel"><div class="panel-header"><h2>Семейный бюджет и телефон</h2></div><p class="tiny muted">Переключение «Мой / Жены / Семья» работает на одном устройстве. Для автоматической синхронизации разных телефонов потребуется отдельное защищённое облако: GitHub Pages не синхронизирует базу.</p>
+ <div class="grid-two"><section class="panel"><div class="panel-header"><h2>Семейный бюджет и телефон</h2></div>
  <label class="field">Чей это телефон по умолчанию?<select id="device-owner">${ownerOptions(state.deviceOwner)}</select></label>
- <p class="tiny muted">Выбор влияет на владельца новых записей и цвета общего режима: у тебя — тёмный, у жены — светло-розовый.</p><button class="btn" data-action="switch-device-profile">Показать свой бюджет</button></section>
- <section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><p class="tiny muted">История хранится на этом телефоне; облачный обмен доступен в разделе TatNet выше. В любом случае сохраняйте JSON-резервные копии.</p><button class="btn" data-action="go-accounts">Перейти к счетам</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
- <section class="panel"><div class="panel-header"><h2>Категории</h2><button class="btn small" data-action="add-category">+ Категория</button></div><p class="tiny muted">${income} доходных · ${expense} расходных. Список категорий можно импортировать через единую кнопку выше.</p>
+ <button class="btn" data-action="switch-device-profile">Показать свой бюджет</button></section>
+ <section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><button class="btn" data-action="go-accounts">Перейти к счетам</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
+ <section class="panel"><div class="panel-header"><h2>Категории</h2><button class="btn small" data-action="add-category">+ Категория</button></div><p class="tiny muted">${income} доходных · ${expense} расходных</p>
  <input id="category-search" type="search" placeholder="Поиск категории" aria-label="Поиск категории" style="width:100%;margin-bottom:12px"/><div class="category-list" id="category-list">${categoryList('')}</div></section>
- <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><p class="muted tiny">Все записи хранятся в IndexedDB телефона. Очистка данных сайта может удалить историю.</p><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button><div class="hint">Для восстановления скачанного JSON используйте единую кнопку <strong>«Импортировать мои данные»</strong> вверху этой страницы. Личные резервные копии не зашифрованы.</div></div></section>
- </div><p class="tiny muted" style="margin-top:20px">Синхронизация через TatNet работает только после входа и первоначального подключения. Для PWA нужен HTTPS или localhost.</p>`;
+ <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button></div></section>
+ </div>`;
 }
 function categoryList(query){
   const items=state.categories.filter(c=>c.name.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
@@ -718,14 +715,16 @@ function bind(){
      const code=await cloud.rotateInvite();openModal('Код для жены',`<p>Передай этот код лично жене. Он даёт доступ к семейным финансам.</p><textarea class="cloud-invite-text" readonly>${esc(code)}</textarea><button class="btn" data-action="cloud-copy-invite" data-code="${esc(code)}">Копировать</button>`);return;
    }
    if(a==='cloud-copy-invite'){await navigator.clipboard.writeText(el.dataset.code);toast('Код скопирован.');return;}
-   if(a==='cloud-upload'){
-     if(!confirm('Перед загрузкой сохрани локальную JSON-копию! Перенести ВСЮ текущую историю в облако TatNet? Не делай это со второго телефона: он должен СКАЧАТЬ семейную базу.'))return;
-     const hasRemote=await cloud.cloudHasRecords();if(hasRemote&&!confirm('В облаке уже есть записи. Будут добавлены только отсутствующие ID, существующие записи не перезапишутся. Продолжить?'))return;
-     toast('Начинаю загрузку истории в TatNet…');const r=await cloud.initialUpload((done,total)=>{const t=$('#toast');if(t)t.textContent=`TatNet: отправлено ${done} из ${total}`});toast(`История отправлена: ${r.sent} новых записей.`);render();return;
-   }
-   if(a==='cloud-download'){
-     if(!confirm('Внимание: СКАЧИВАНИЕ ЗАМЕНИТ всю базу на этом устройстве. Сначала нажми «Скачать полную копию JSON» ниже и сохрани файл. Продолжить?'))return;
-     const r=await cloud.initialDownload();await loadData();render();toast(`История загружена: ${r.transactions||0} операций`);return;
+   if(a==='cloud-start'){
+     if(cloud.status().busy){toast('Обновление уже выполняется');return;}
+     const hasRemote=await cloud.cloudHasRecords();
+     if(hasRemote){
+       if(!confirm('Загрузить семейные данные на это устройство? Текущие местные записи будут заменены. Сначала сохрани JSON-копию в разделе «Резервная копия».'))return;
+       const r=await cloud.initialDownload();await loadData();render();toast(`Данные загружены: ${r.transactions||0} операций`);return;
+     }
+     if(!confirm('Начать синхронизацию и отправить записи с этого устройства в семейный бюджет? Перед этим сохрани JSON-копию.'))return;
+     const r=await cloud.initialUpload((done,total)=>{const t=$('#toast');if(t)t.textContent=`Отправлено ${done} из ${total}`});
+     render();toast(`Синхронизация включена. Отправлено ${r.sent} записей.`);return;
    }
    if(a==='cloud-sync'){const r=await cloud.sync();await loadData();render();toast(`Синхронизация завершена: ${r?.sent||0} изменений отправлено.`);return;}
 
@@ -776,7 +775,7 @@ function bind(){
     if(f.id==='cloud-auth-form'){
       const d=new FormData(f),register=e.submitter?.value==='register';
       if(register){const live=await cloud.signUp(String(d.get('email')),String(d.get('password')));toast(live?'Регистрация выполнена.':'Проверь почту: подтверди регистрацию и затем войди.');}
-      else {const ff=await cloud.signIn(String(d.get('email')),String(d.get('password')));toast(ff.length?`Вход выполнен. У тебя семей: ${ff.length}`:'Вход выполнен. Создай семью.');}
+      else {const ff=await cloud.signIn(String(d.get('email')),String(d.get('password')));toast(ff.length?'Вход выполнен.':'Вход выполнен. Создай семью.');}
       render();return;
     }
     if(f.id==='cloud-create-form'){const code=await cloud.createFamily(String(new FormData(f).get('familyName')));openModal('Семья создана',`<p>Сохрани код для присоединения жены. Его можно показать только сейчас, но позже создать новый.</p><textarea class="cloud-invite-text" readonly>${esc(code)}</textarea><button class="btn" data-action="cloud-copy-invite" data-code="${esc(code)}">Скопировать код</button>`);render();return;}

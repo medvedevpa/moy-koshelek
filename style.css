@@ -196,3 +196,11 @@ html[data-theme=rose] .month-navigation .selected-month{background:#fff;color:#a
 @media(max-width:350px){.quick-cat-icon{height:55px;width:55px}.quick-category-grid{gap:10px 3px}}
 /* TatNet cloud connection panel */
 .cloud-panel{margin-bottom:18px}.cloud-panel .cloud-actions{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0}.cloud-panel .cloud-subform{border-top:1px solid var(--line, #425064);margin-top:14px;padding-top:14px}.cloud-panel .form-grid{margin-top:10px}.cloud-panel .cloud-warn{border-left:3px solid #e88b77;margin-bottom:12px}.cloud-families{display:flex;gap:10px;flex-direction:column}.cloud-invite-text{display:block;width:100%;min-height:88px;padding:14px;font-size:13px;overflow-wrap:anywhere}
+
+/* Compact account view */
+.cloud-panel .panel-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cloud-account-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;font-size:13px;overflow-wrap:anywhere}
+.sync-status{font-size:12px;font-weight:700;white-space:nowrap}.sync-on{color:#53bc90}.sync-off{color:#db9a63}
+.cloud-notice{margin:13px 0;font-size:14px;line-height:1.5;color:var(--text-muted,#97a8bb)}
+.cloud-error{padding:10px 12px;border-radius:10px;background:rgba(229,93,93,.12);color:#e77e78;margin-bottom:12px;font-size:13px}
+.cloud-timestamp{margin-top:8px;font-size:12px;opacity:.75}
