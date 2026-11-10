@@ -28,9 +28,9 @@ const DEVICE_KEY='moy-koshelek-device-owner-v8';
 const devicePref=()=>{try{return localStorage.getItem(DEVICE_KEY)||'me';}catch{return 'me';}};
 const saveLocal=(key,value)=>{try{localStorage.setItem(key,value);}catch{}};
 const OWNERS={me:'Мой',wife:'Жены',matvey:'Матвей',family:'Семья'};
-const PROFILE_IMAGES={me:'./assets/logo-man.webp',wife:'./assets/logo-light.webp',matvey:'./assets/logo-light.webp',family:'./assets/logo-family.webp'};
+const PROFILE_IMAGES={me:'./assets/logo-man.webp',wife:'./assets/logo-light.webp',matvey:'./assets/logo-matvey.webp',family:'./assets/logo-family.webp'};
 const PROFILE_LOOK={me:{name:'Мой кошелёк',sub:'Личный бюджет',emoji:'🌙',theme:'night'},wife:{name:'Кошелёк жены',sub:'Личный бюджет',emoji:'🌸',theme:'rose'},matvey:{name:'Кошелёк Матвея',sub:'Накопления и расходы',emoji:'🧸',theme:'aqua'},family:{name:'Семейный бюджет',sub:'Общий кошелёк',emoji:'💚',theme:'mint'}};
-let state = { wallets:[], categories:[], transactions:[], budgets:[], catUI:{type:'expense',view:'active',sort:'frequent',search:''}, page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
+let state = { wallets:[], categories:[], transactions:[], budgets:[], catUI:{type:'expense',view:'active',sort:'frequent',search:''}, houseUI:{section:'all',subproject:'all',search:''}, page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
 
 function wallet() {
  const picked=state.wallets.find(w=>w.id===state.walletId&&w.status!=='closed');
@@ -196,7 +196,7 @@ function premiumTransactionRows(rows,limit=5){
  const w=wallet(),r=[...rows].filter(t=>walletCurrencyMatches(t,w)&&t.type!=='transfer').sort(sortTx).slice(0,limit);
  if(!r.length)return `<div class="premium-empty">Операций пока нет <button class="text-action" data-action="add-tx">Добавить первую</button></div>`;
  return r.map(t=>{const c=cat(t.categoryId),delta=displayDelta(t,w);
- return `<button class="lux-tx-row" data-action="edit-tx" data-id="${esc(t.id)}"><span class="lux-tx-icon">${c?iconForCategory(c):t.type==='income'?'💰':'🧾'}</span><span class="lux-tx-info"><b>${esc(c?.name||'Без категории')}</b><small>${esc(shortDate(t.date))}${t.projectId==='home'?' · 🏡 Дом':''}${benefit(t)>0?' · 🎁 +'+esc(format(benefit(t))):''}</small></span><strong class="${delta>=0?'positive':'negative'}">${delta>0?'+':''}${esc(format(delta,w.currency))}</strong></button>`;
+ return `<button class="lux-tx-row" data-action="edit-tx" data-id="${esc(t.id)}"><span class="lux-tx-icon">${c?iconForCategory(c):t.type==='income'?'💰':'🧾'}</span><span class="lux-tx-info"><b>${esc(c?.name||'Без категории')}</b><small>${esc(shortDate(t.date))}${t.projectId==='home'?' · 🏡 Дом':''}${t.houseSubprojectId?' · '+esc(houseTaxonomy().subprojects.find(x=>x.id===t.houseSubprojectId)?.name||'Подпроект'):''}${benefit(t)>0?' · 🎁 +'+esc(format(benefit(t))):''}</small></span><strong class="${delta>=0?'positive':'negative'}">${delta>0?'+':''}${esc(format(delta,w.currency))}</strong></button>`;
  }).join('');
 }
 function accountVisual(w){return w.kind==='deposit'?'🏦':w.kind==='savings'?'🌱':w.kind==='cash'?'💵':ownerOfWallet(w)==='wife'?'💗':ownerOfWallet(w)==='matvey'?'🧸':'💳';}
@@ -231,17 +231,102 @@ function renderAccounts(){
  <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Мои счета</h2><button class="text-action" data-action="add-wallet">＋ Новый</button></div><div class="lux-account-list">${accounts.map(a=>`<div class="lux-account-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>${esc(OWNERS[ownerOfWallet(a)])}${a.kind==='deposit'?' · вклад '+Number(a.rate||0)+'%':''}${a.balanceAnchorAt?' · ✓ сверено':''}</small></span><strong>${esc(format(balance(a),a.currency))}</strong><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Изменить счёт">›</button></div>`).join('')}</div>${archived.length?`<details class="lux-archived-accounts"><summary>Архивные счета (${archived.length})</summary><p class="small-text muted">Операции остаются в истории. Архивные счета не входят в текущий баланс.</p>${archived.map(a=>`<div class="lux-account-line lux-archived-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>Архив · ${esc(OWNERS[ownerOfWallet(a)])}</small></span><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Управлять архивным счётом">Вернуть ›</button></div>`).join('')}</details>`:''}<button class="lux-main-button" data-action="adjust-balances">✓ Актуализировать остатки</button></section>
  <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Вклады и накопления</h2><button class="text-action" data-action="add-deposit">+ Добавить</button></div>${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').length?`<div class="lux-account-grid">${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').map(a=>`<button class="lux-account-tile" data-action="edit-wallet" data-id="${esc(a.id)}"><span class="lux-account-symbol">${accountVisual(a)}</span><span class="lux-account-name">${esc(a.name)}</span><strong>${esc(format(balance(a),a.currency))}</strong>${a.rate?`<small>${Number(a.rate)}% годовых</small>`:''}</button>`).join('')}</div>`:'<div class="premium-empty">Добавьте вклад или накопительный счёт</div>'}<div class="lux-quick-actions"><button data-action="add-interest">＋ Проценты по вкладу</button><button data-action="download-deposit-template">⇩ Шаблон CSV</button></div><details class="lux-extra-tools"><summary>Импорт вкладов и параметры</summary><label class="field">Загрузить список вкладов (CSV)<input type="file" id="deposit-csv-file" accept=".csv,text/csv"></label><p class="muted small-text">Вклад — это актив, а не доход. Процентные начисления учитываются отдельно.</p></details></section></div>`;
 }
+// House sections and subprojects are financial tags, never separate wallets or charges.
+// Store the whole editable taxonomy as one 'budgets' record, so it is included
+// in existing JSON backups and the current family sync without a DB migration.
+const HOUSE_TAXONOMY_ID='house-taxonomy-v1';
+const HOUSE_DEFAULT_SECTIONS=[
+ {id:'materials',name:'Материалы',icon:'🧱',active:true},
+ {id:'work',name:'Работы',icon:'🛠️',active:true},
+ {id:'mortgage',name:'Ипотека',icon:'🏦',active:true},
+ {id:'utilities',name:'Содержание',icon:'⚡',active:true},
+ {id:'other',name:'Прочее',icon:'📦',active:true}
+];
+function houseTaxonomy(){
+ const saved=state.budgets.find(b=>b.id===HOUSE_TAXONOMY_ID);
+ return {sections:Array.isArray(saved?.sections)?saved.sections.map(x=>({...x})):HOUSE_DEFAULT_SECTIONS.map(x=>({...x})),
+         subprojects:Array.isArray(saved?.subprojects)?saved.subprojects.map(x=>({...x})):[]};
+}
+function houseSectionForTx(t){
+ if(t.houseSection)return t.houseSection;
+ const n=(cat(t.categoryId)?.name||'')+' '+(t.note||'');
+ return /ипотек/i.test(n)?'mortgage':/материал|бетон|кирпич|окн/i.test(n)?'materials':/работ|монтаж|строител/i.test(n)?'work':'other';
+}
+function houseSectionsOptions(selected=''){
+ const sections=houseTaxonomy().sections.filter(x=>x.active!==false||x.id===selected);
+ return sections.map(s=>opt(s.id,`${s.icon||'🏡'} ${s.name}${s.active===false?' (скрыт)':''}`,s.id===selected)).join('');
+}
+function houseSubprojectChoices(query='',form=document.querySelector('#tx-form')){
+ if(!form)return;
+ const taxonomy=houseTaxonomy(),section=form.elements.houseSection?.value;
+ const selected=form.elements.houseSubproject?.value||'',q=query.trim().toLocaleLowerCase('ru');
+ const options=taxonomy.subprojects.filter(x=>(x.active!==false||x.id===selected)&&(!q||x.name.toLocaleLowerCase('ru').includes(q)||taxonomy.sections.find(s=>s.id===x.sectionId)?.name.toLocaleLowerCase('ru').includes(q)))
+ .sort((a,b)=>(b.id===selected)-(a.id===selected)||a.name.localeCompare(b.name,'ru')).slice(0,30);
+ const list=form.querySelector('#house-subproject-choices');if(!list)return;
+ list.innerHTML=`<button type="button" data-action="choose-house-subproject" data-id="" class="house-subchoice ${!selected?'chosen':''}">Без подпроекта</button>`+options.map(x=>`<button type="button" data-action="choose-house-subproject" data-id="${esc(x.id)}" class="house-subchoice ${selected===x.id?'chosen':''}"><span>${esc(x.icon||'🔹')} ${esc(x.name)}</span><small>${esc(taxonomy.sections.find(s=>s.id===x.sectionId)?.name||'Раздел')}</small></button>`).join('')+(q&&!options.length?'<span class="house-empty-search">Ничего не найдено</span>':'');
+ const pick=taxonomy.subprojects.find(x=>x.id===selected);const chosen=form.querySelector('#house-subproject-selected');
+ if(chosen)chosen.textContent=pick?`${pick.icon||'🔹'} ${pick.name} · ${taxonomy.sections.find(s=>s.id===pick.sectionId)?.name||''}`:'Без подпроекта';
+}
+async function saveHouseTaxonomy(taxonomy){
+ const old=state.budgets.find(b=>b.id===HOUSE_TAXONOMY_ID);
+ await save('budgets',{...old,id:HOUSE_TAXONOMY_ID,kind:'houseTaxonomy',ownerId:'family',name:'Разделы проекта «Наш дом»',sections:taxonomy.sections,subprojects:taxonomy.subprojects});
+ await loadData();render();
+}
+function houseSectionTotals(rows){
+ const result=new Map();for(const t of rows){const k=houseSectionForTx(t);result.set(k,(result.get(k)||0)+netExpense(t));}return result;
+}
+function houseSubprojectList(rows){
+ const tax=houseTaxonomy(),q=state.houseUI.search.trim().toLocaleLowerCase('ru');
+ const subs=tax.subprojects.filter(x=>x.active!==false||rows.some(t=>t.houseSubprojectId===x.id))
+  .filter(x=>(state.houseUI.section==='all'||state.houseUI.section===x.sectionId)&&(!q||x.name.toLocaleLowerCase('ru').includes(q)||tax.sections.find(s=>s.id===x.sectionId)?.name.toLocaleLowerCase('ru').includes(q)))
+  .sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+ if(!subs.length)return '<p class="muted small-text">Подпроектов пока нет. Например, создайте «Электрика» в разделе «Работы».</p>';
+ return subs.map(x=>{const related=rows.filter(t=>t.houseSubprojectId===x.id),sum=related.reduce((v,t)=>v+netExpense(t),0),selected=state.houseUI.subproject===x.id;
+  return `<div class="house-subproject-item ${selected?'selected':''}"><button data-action="house-filter-subproject" data-id="${esc(x.id)}" title="Показать операции"><span class="house-subicon">${esc(x.icon||'🔹')}</span><span class="house-subtext"><b>${esc(x.name)}</b><small>${esc(tax.sections.find(s=>s.id===x.sectionId)?.name||'Раздел')} · ${related.length} операций</small></span><strong>${esc(format(sum))}</strong></button><button class="house-mini-edit" data-action="house-edit-subproject" data-id="${esc(x.id)}" aria-label="Редактировать подпроект ${esc(x.name)}">✎</button></div>`;
+ }).join('');
+}
+function houseFilteredOperations(rows){
+ const tax=houseTaxonomy(),q=state.houseUI.search.trim().toLocaleLowerCase('ru');
+ return rows.filter(t=>(state.houseUI.section==='all'||houseSectionForTx(t)===state.houseUI.section)&&
+ (state.houseUI.subproject==='all'||t.houseSubprojectId===state.houseUI.subproject)&&
+ (!q||[cat(t.categoryId)?.name,t.note,t.labels?.join(' '),tax.sections.find(s=>s.id===houseSectionForTx(t))?.name,tax.subprojects.find(x=>x.id===t.houseSubprojectId)?.name].some(x=>String(x||'').toLocaleLowerCase('ru').includes(q))));
+}
+function houseOperationRows(rows){const filtered=houseFilteredOperations(rows);return filtered.length?premiumTransactionRows(filtered,30):'<p class="muted small-text">Нет расходов по выбранным условиям.</p>';}
 function renderHomeProject(){
- const rows=state.transactions.filter(t=>t.projectId==='home'&&t.type==='expense').sort(sortTx);const total=rows.reduce((s,t)=>s+netExpense(t),0);
- const month=state.focusMonth;const monthly=rows.filter(t=>t.date.startsWith(month)).reduce((s,t)=>s+netExpense(t),0);
- const getSection=t=>t.houseSection||(/ипотек/i.test(cat(t.categoryId)?.name||'')?'mortgage':/материал|бетон|кирпич|окн/i.test((cat(t.categoryId)?.name||'')+' '+(t.note||''))?'materials':/работ|монтаж|строител/i.test(cat(t.categoryId)?.name||'')?'work':'other');
- const sectionAmount=id=>rows.filter(t=>getSection(t)===id).reduce((s,t)=>s+netExpense(t),0);
- const cfg=state.budgets.find(b=>b.id==='house-project-v1');const plan=cfg?.limitMinor||0;
- const mortgage=cfg?.mortgageMonthlyMinor||0;
+ const rows=state.transactions.filter(t=>t.projectId==='home'&&t.type==='expense').sort(sortTx),total=rows.reduce((s,t)=>s+netExpense(t),0);
+ const month=state.focusMonth,monthly=rows.filter(t=>t.date.startsWith(month)).reduce((s,t)=>s+netExpense(t),0),tax=houseTaxonomy(),totals=houseSectionTotals(rows);
+ const cfg=state.budgets.find(b=>b.id==='house-project-v1'),plan=cfg?.limitMinor||0,mortgage=cfg?.mortgageMonthlyMinor||0;
+ const sectionButtons=`<button data-action="house-filter-section" data-id="all" class="house-filter-chip ${state.houseUI.section==='all'?'active':''}">Все</button>`+tax.sections.filter(x=>x.active!==false||totals.has(x.id)).map(x=>`<button data-action="house-filter-section" data-id="${esc(x.id)}" class="house-filter-chip ${state.houseUI.section===x.id?'active':''}">${esc(x.icon||'🏡')} ${esc(x.name)}</button>`).join('');
  return `<div class="lux-dashboard house-screen"><section class="lux-panel lux-house-hero"><div class="lux-house-image"><img src="./assets/our-house.webp" alt="Эскиз нашего будущего дома"><div class="lux-house-image-label"><b>Наш дом</b><small>Семейный проект</small></div></div><div class="lux-house-metrics"><div><small>Потрачено</small><strong>${esc(format(total))}</strong></div><div><small>За ${esc(monthTitle(month))}</small><strong>${esc(format(monthly))}</strong></div><div><small>Ипотека / мес.</small><strong>${mortgage?esc(format(mortgage)):'—'}</strong></div></div></section>
- <section class="lux-house-kpis"><div class="lux-house-kpi"><span>🏦</span><small>Ипотека</small><b>${esc(format(sectionAmount('mortgage')))}</b></div><div class="lux-house-kpi"><span>🧱</span><small>Материалы</small><b>${esc(format(sectionAmount('materials')))}</b></div><div class="lux-house-kpi"><span>👷</span><small>Работы</small><b>${esc(format(sectionAmount('work')))}</b></div><div class="lux-house-kpi"><span>⚡</span><small>Содержание</small><b>${esc(format(sectionAmount('utilities')))}</b></div></section>
- <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Бюджет строительства</h2><button class="text-action" data-action="home-settings">Настроить ›</button></div><div class="lux-plan"><span>Потрачено: <b>${esc(format(total))}</b></span><span>План: <b>${plan?esc(format(plan)):'Не задан'}</b></span></div>${cfg?.mortgageDebtMinor?`<p class="muted small-text">Остаток ипотечного долга: <strong>${esc(format(cfg.mortgageDebtMinor))}</strong></p>`:''}${plan?`<div class="lux-progress"><span style="width:${Math.min(100,total/plan*100)}%"></span></div><p class="muted small-text">${Math.round(total/plan*100)}% плана · осталось ${esc(format(Math.max(0,plan-total)))}</p>`:'<p class="muted small-text">Можно указать ориентировочную сумму бюджета, но это необязательно.</p>'}</section>
- <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Расходы по дому</h2><button class="text-action" data-action="add-home-expense">＋ Расход</button></div>${premiumTransactionRows(rows,15)}<div class="lux-quick-actions"><button data-action="add-home-expense">＋ Добавить расход по дому</button><button data-action="home-settings">⚙ Ипотека и план</button></div></section></div>`;
+ <section class="lux-panel lux-section house-sections-panel"><div class="lux-section-head"><h2>Разделы расходов</h2><button class="text-action" data-action="house-manage-sections">⚙ Управлять</button></div><div class="house-dynamic-sections">${tax.sections.filter(x=>x.active!==false||totals.has(x.id)).map(x=>`<button class="house-dynamic-section" data-action="house-filter-section" data-id="${esc(x.id)}"><span>${esc(x.icon||'🏡')}</span><small>${esc(x.name)}</small><b>${esc(format(totals.get(x.id)||0))}</b></button>`).join('')}</div><div class="lux-quick-actions"><button data-action="house-new-section">＋ Новый раздел</button></div></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Бюджет строительства</h2><button class="text-action" data-action="home-settings">Настроить ›</button></div><div class="lux-plan"><span>Потрачено: <b>${esc(format(total))}</b></span><span>План: <b>${plan?esc(format(plan)):'Не задан'}</b></span></div>${cfg?.mortgageDebtMinor?`<p class="muted small-text">Остаток ипотечного долга: <strong>${esc(format(cfg.mortgageDebtMinor))}</strong></p>`:''}${plan?`<div class="lux-progress"><span style="width:${Math.min(100,total/plan*100)}%"></span></div><p class="muted small-text">${Math.round(total/plan*100)}% плана · осталось ${esc(format(Math.max(0,plan-total)))}</p>`:''}</section>
+ <section class="lux-panel lux-section house-subprojects-panel"><div class="lux-section-head"><h2>Подпроекты</h2><button class="text-action" data-action="house-new-subproject">＋ Добавить</button></div><label class="house-project-search"><span>⌕</span><input id="house-project-search" type="search" placeholder="Поиск: электрика, окна, сантехника…" value="${esc(state.houseUI.search)}" aria-label="Поиск по проекту" autocomplete="off"></label><div class="house-section-filters">${sectionButtons}</div><div id="house-subproject-grid" class="house-subproject-grid">${houseSubprojectList(rows)}</div><button class="house-link-button" data-action="house-manage-subprojects">Редактировать все подпроекты ›</button></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Операции по дому</h2><button class="text-action" data-action="add-home-expense">＋ Расход</button></div><div id="house-operation-list">${houseOperationRows(rows)}</div><div class="lux-quick-actions"><button data-action="add-home-expense">＋ Добавить расход</button><button data-action="home-settings">⚙ Ипотека и план</button></div></section></div>`;
+}
+function openHouseManager(kind){
+ const tax=houseTaxonomy(),sections=kind==='sections',items=sections?tax.sections:tax.subprojects;
+ openModal(sections?'Разделы расходов по дому':'Подпроекты дома',`<div class="house-manager"><p class="small-text muted">Можно менять название, значок и видимость. Старые операции сохраняются.</p>${items.map(x=>`<div class="house-manager-row"><span>${esc(x.icon||'🏡')}</span><div><b>${esc(x.name)}</b><small>${x.active===false?'Скрыт':sections?'Раздел':esc(tax.sections.find(s=>s.id===x.sectionId)?.name||'Раздел')}</small></div><button data-action="${sections?'house-edit-section':'house-edit-subproject'}" data-id="${esc(x.id)}">Изменить</button></div>`).join('')||'<p class="muted">Пока пусто</p>'}<button class="lux-main-button" data-action="${sections?'house-new-section':'house-new-subproject'}">＋ ${sections?'Новый раздел':'Новый подпроект'}</button></div>`);
+}
+function openHouseEditor(kind,id=''){
+ const tax=houseTaxonomy(),sections=kind==='sections',old=(sections?tax.sections:tax.subprojects).find(x=>x.id===id);
+ const title=sections?(old?'Редактировать раздел':'Новый раздел'):(old?'Редактировать подпроект':'Новый подпроект');
+ openModal(title,`<form id="${sections?'house-section-form':'house-subproject-form'}" data-id="${esc(id)}" class="form-grid house-taxonomy-form">
+ ${field('Название',`<input name="name" value="${esc(old?.name||'')}" maxlength="90" placeholder="Например, ${sections?'Инженерные сети':'Электрика'}" required>`,true)}
+ ${field('Значок (эмодзи)',`<input name="icon" value="${esc(old?.icon|| (sections?'🏡':'⚡'))}" maxlength="12" placeholder="⚡">`,true)}
+ ${sections?'':field('Раздел расходов',`<select name="sectionId">${tax.sections.filter(x=>x.active!==false||x.id===old?.sectionId).map(x=>opt(x.id,`${x.icon||'🏡'} ${x.name}`,x.id===(old?.sectionId||'work'))).join('')}</select>`,true)}
+ <label class="field wide house-editor-active"><span>Показывать при добавлении расходов</span><input type="checkbox" name="active" ${old?.active===false?'':'checked'}></label>
+ <div class="modal-actions wide"><button type="button" class="btn" data-action="${sections?'house-manage-sections':'house-manage-subprojects'}">Назад</button><button class="btn primary" type="submit">Сохранить</button></div></form>`);
+}
+async function submitHouseEditor(form,kind){
+ const tax=houseTaxonomy(),sections=kind==='sections',list=sections?tax.sections:tax.subprojects,old=list.find(x=>x.id===form.dataset.id),f=new FormData(form);
+ const name=cleanName(f.get('name')),icon=String(f.get('icon')||'🏡').trim(),active=f.get('active')==='on';
+ if(name.length<1||name.length>90)throw Error('Укажите название до 90 символов');
+ if(list.some(x=>x.id!==old?.id&&x.name.toLocaleLowerCase('ru')===name.toLocaleLowerCase('ru')))throw Error('Такое название уже есть');
+ const sectionId=String(f.get('sectionId')||'');
+ if(!sections&&!tax.sections.some(x=>x.id===sectionId))throw Error('Выберите раздел');
+ const x={...old,id:old?.id||uid(),name,icon:icon.slice(0,12),active,...(!sections?{sectionId}:{})};
+ if(old)list.splice(list.indexOf(old),1,x);else list.push(x);
+ await saveHouseTaxonomy(tax);closeModal();toast(sections?'Раздел сохранён.':'Подпроект сохранён.');
 }
 function openBalanceAdjustment(){
  const wallets=state.wallets.filter(w=>w.status!=='closed'&&w.currency==='RUB');
@@ -303,7 +388,7 @@ function renderTransactions(){ const f=state.txFilters;return `<section class="p
   <div class="toolbar"><input id="tx-from" type="date" aria-label="Дата с" value="${esc(f.from)}"/><input id="tx-to" type="date" aria-label="Дата по" value="${esc(f.to)}"/><input id="tx-min" type="number" min="0" step="0.01" placeholder="Сумма от" value="${esc(f.min)}"/><input id="tx-max" type="number" min="0" step="0.01" placeholder="Сумма до" value="${esc(f.max)}"/><button class="btn small" data-action="clear-filters">Сбросить</button></div>
   <div id="tx-list">${transactionList()}</div></section>`; }
 function renderBudgets(){
-  const w=wallet(),currentMonth=today().slice(0,7),relevant=state.budgets.filter(b=>b.kind!=='houseProject'&&b.kind!=='recurring'&&(state.profileId==='family'||(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))===state.profileId));
+  const w=wallet(),currentMonth=today().slice(0,7),relevant=state.budgets.filter(b=>b.kind!=='houseProject'&&b.kind!=='houseTaxonomy'&&b.kind!=='recurring'&&(state.profileId==='family'||(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))===state.profileId));
   return `<section class="panel section-gap"><div class="panel-header"><div><h2>Лимиты расходов</h2><p class="tiny muted" style="margin:7px 0 0">Текущий месяц · по владельцу расхода, независимо от карты оплаты</p></div><button class="btn primary small" data-action="add-budget">+ Бюджет</button></div>
   ${relevant.length?relevant.map(b=>{
     const used=state.transactions.filter(t=>ownerOfTx(t)===(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))&&t.type==='expense'&&walletCurrencyMatches(t,w)&&t.date.startsWith(currentMonth)&&(!b.categoryId||t.categoryId===b.categoryId)).reduce((s,t)=>s+netExpense(t),0);
@@ -474,12 +559,13 @@ function openTransaction(id,preferredType='expense',presetCategory=''){
  <div id="tx-category-wrap">${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions(editingType,t?.categoryId||presetCategory,false,true)}</select>`)}</div>
  <div class="field ${editingType==='transfer'?'':'hidden'}" id="tx-destination">${field('В какой кошелёк',`<select name="toWallet"><option value="">Выберите</option>${walletOptions(t?.toWalletId||'', x=>x.id!==w.id&&x.currency===w.currency)}</select>`)}</div>
  ${field('Заметка',`<input name="note" maxlength="500" value="${esc(t?.note||pendingRecurring?.name||'')}" placeholder="Необязательно">`)}
- <div id="tx-house-wrap" class="tx-house-field ${editingType==='expense'?'':'hidden'}"><label class="house-check"><input type="checkbox" name="houseProject" ${homeDefault?'checked':''}><span>🏡 Отнести к проекту «Наш дом»</span></label><label class="field">Раздел расходов<select name="houseSection">${[['other','Прочее'],['materials','Материалы'],['work','Работы'],['mortgage','Ипотека'],['utilities','Содержание']].map(([v,l])=>opt(v,l,t?.houseSection===v)).join('')}</select></label></div>
+ <div id="tx-house-wrap" class="tx-house-field ${editingType==='expense'?'':'hidden'}"><label class="house-check"><input type="checkbox" name="houseProject" ${homeDefault?'checked':''}><span>🏡 Отнести к проекту «Наш дом»</span></label><div class="house-tx-fields ${homeDefault?'':'hidden'}" id="house-tx-fields"><label class="field">Раздел расходов<select name="houseSection">${houseSectionsOptions(t?.houseSection||'other')}</select></label><label class="field">Найти подпроект<input type="search" id="house-subproject-search" placeholder="Например, электрика…" autocomplete="off"></label><input type="hidden" name="houseSubproject" value="${esc(t?.houseSubprojectId||'')}"><div id="house-subproject-selected" class="house-selected-subproject">Без подпроекта</div><div id="house-subproject-choices" class="house-subproject-choices"></div></div></div>
  ${field('Метки',`<input name="labels" value="${esc((t?.labels||[]).join(', '))}" placeholder="Необязательно">`)}</div></details>
  <div class="tx-entry-actions">${t?`<button type="button" class="btn danger" data-action="delete-tx" data-id="${esc(t.id)}">Удалить</button>`:''}<button class="btn primary" type="submit">Сохранить</button></div></form>`;
  openModal(t?'Изменить операцию':'Новая операция',body);
  updateTransactionType(true);
  renderKeypadAmount();
+ houseSubprojectChoices();
 }
 function updateTransactionType(preserveCategory=false){
  document.querySelectorAll('.type-tab').forEach(b=>b.classList.toggle('active',b.dataset.type===editingType));
@@ -743,7 +829,7 @@ async function submitTransaction(form){
  if(editingType==='transfer'&&(!dest||dest.id===w.id||dest.currency!==w.currency))return toast('Для перевода выберите другой кошелёк в той же валюте.');
  const cashback=editingType==='expense'?cashbackFormData(form,amount,existing):{cashbackMinor:0,cashbackStatus:'expected',cashbackDate:null};
  if(!cashback)return toast('Кешбэк должен быть от 0 до 100% стоимости покупки.');
- const item={...existing,...cashback,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,ownerId:String(data.get('owner')||state.deviceOwner),date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString(),projectId:editingType==='expense'&&data.get('houseProject')==='on'?'home':null,houseSection:editingType==='expense'&&data.get('houseProject')==='on'?String(data.get('houseSection')||'other'):null};
+ const item={...existing,...cashback,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,ownerId:String(data.get('owner')||state.deviceOwner),date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString(),projectId:editingType==='expense'&&data.get('houseProject')==='on'?'home':null,houseSection:editingType==='expense'&&data.get('houseProject')==='on'?String(data.get('houseSection')||'other'):null,houseSubprojectId:editingType==='expense'&&data.get('houseProject')==='on'?String(data.get('houseSubproject')||'')||null:null};
  state.pendingHomeExpense=false;state.pendingRecurring=null;await save('transactions',item);await loadData();closeModal();render();toast('Операция сохранена.');
 }
 async function submitBudget(form){
@@ -951,6 +1037,21 @@ function bind(){
    if(a==='add-budget'){openBudget();return;}
    if(a==='edit-budget'){openBudget(id);return;}
    if(a==='delete-budget') {if(confirm('Удалить бюджет?')){await remove('budgets',id);await loadData();render();}return;}
+   if(a==='house-new-section'){openHouseEditor('sections');return;}
+   if(a==='house-new-subproject'){openHouseEditor('subprojects');return;}
+   if(a==='house-manage-sections'){openHouseManager('sections');return;}
+   if(a==='house-manage-subprojects'){openHouseManager('subprojects');return;}
+   if(a==='house-edit-section'){openHouseEditor('sections',id);return;}
+   if(a==='house-edit-subproject'){openHouseEditor('subprojects',id);return;}
+   if(a==='house-filter-section'){state.houseUI.section=state.houseUI.section===id?'all':id;state.houseUI.subproject='all';render();return;}
+   if(a==='house-filter-subproject'){state.houseUI.subproject=state.houseUI.subproject===id?'all':id;render();return;}
+   if(a==='choose-house-subproject'){
+     const form=el.closest('#tx-form');if(!form)return;const selected=houseTaxonomy().subprojects.find(x=>x.id===id);
+     form.elements.houseSubproject.value=selected?.id||'';
+     if(selected)form.elements.houseSection.value=selected.sectionId;
+     houseSubprojectChoices(form.querySelector('#house-subproject-search')?.value||'',form);
+     return;
+   }
    if(a==='add-wallet'){openWallet();return;}
    if(a==='edit-wallet'){openWallet(id);return;}
    if(a==='delete-wallet'){await deleteWalletSafely(id);return;}
@@ -979,7 +1080,7 @@ function bind(){
   }catch(err){console.error(err);toast('Ошибка: '+err.message);}
  });
  document.addEventListener('submit',async e=>{
-  const f=e.target;if(!['tx-form','budget-form','wallet-form','category-form','import-form','ocr-expense-form','deposit-form','deposit-interest-form','cloud-auth-form','cloud-create-form','cloud-join-form','balances-form','home-settings-form','recurring-form'].includes(f.id))return;
+  const f=e.target;if(!['tx-form','budget-form','wallet-form','category-form','import-form','ocr-expense-form','deposit-form','deposit-interest-form','cloud-auth-form','cloud-create-form','cloud-join-form','balances-form','home-settings-form','recurring-form','house-section-form','house-subproject-form'].includes(f.id))return;
   e.preventDefault();const btn=f.querySelector('button[type=submit]');if(btn)btn.disabled=true;
   try{
     if(f.id==='cloud-auth-form'){
@@ -990,12 +1091,21 @@ function bind(){
     }
     if(f.id==='cloud-create-form'){const code=await cloud.createFamily(String(new FormData(f).get('familyName')));openModal('Семья создана',`<p>Сохрани код для присоединения жены. Его можно показать только сейчас, но позже создать новый.</p><textarea class="cloud-invite-text" readonly>${esc(code)}</textarea><button class="btn" data-action="cloud-copy-invite" data-code="${esc(code)}">Скопировать код</button>`);render();return;}
     if(f.id==='cloud-join-form'){await cloud.joinFamily(String(new FormData(f).get('invite')));render();toast('Ты присоединился к семье. Теперь скачай её историю.');return;}
-    if(f.id==='balances-form')await saveBalanceAdjustment(f);if(f.id==='home-settings-form')await saveHomeSettings(f);if(f.id==='recurring-form')await saveRecurring(f);if(f.id==='tx-form')await submitTransaction(f);if(f.id==='ocr-expense-form')await submitOcrExpense(f);if(f.id==='budget-form')await submitBudget(f);if(f.id==='wallet-form')await submitWallet(f);if(f.id==='category-form')await submitCategory(f);if(f.id==='import-form')await doCSVImport(f);if(f.id==='deposit-form')await submitDeposit(f);if(f.id==='deposit-interest-form')await submitDepositInterest(f);}
+    if(f.id==='house-section-form')await submitHouseEditor(f,'sections');if(f.id==='house-subproject-form')await submitHouseEditor(f,'subprojects');if(f.id==='balances-form')await saveBalanceAdjustment(f);if(f.id==='home-settings-form')await saveHomeSettings(f);if(f.id==='recurring-form')await saveRecurring(f);if(f.id==='tx-form')await submitTransaction(f);if(f.id==='ocr-expense-form')await submitOcrExpense(f);if(f.id==='budget-form')await submitBudget(f);if(f.id==='wallet-form')await submitWallet(f);if(f.id==='category-form')await submitCategory(f);if(f.id==='import-form')await doCSVImport(f);if(f.id==='deposit-form')await submitDeposit(f);if(f.id==='deposit-interest-form')await submitDepositInterest(f);}
   catch(err){console.error(err);toast('Ошибка: '+err.message);}
   finally{if(btn&&btn.isConnected)btn.disabled=false;}
  });
  document.addEventListener('change',async e=>{
   const el=e.target,id=el.id;
+  if(el.name==='houseProject'&&el.closest('#tx-form')){
+   const form=el.closest('#tx-form');form.querySelector('#house-tx-fields')?.classList.toggle('hidden',!el.checked);
+   if(el.checked)houseSubprojectChoices('',form);return;
+  }
+  if(el.name==='houseSection'&&el.closest('#tx-form')){
+   const form=el.closest('#tx-form'),selected=houseTaxonomy().subprojects.find(x=>x.id===form.elements.houseSubproject.value);
+   if(selected&&selected.sectionId!==el.value)form.elements.houseSubproject.value='';
+   houseSubprojectChoices(form.querySelector('#house-subproject-search')?.value||'',form);return;
+  }
   if(id==='wallet-picker'){state.walletId=el.value;render();return;}
   if(id==='category-manager-sort'){state.catUI.sort=el.value;$('#categories-results').innerHTML=categoryManagerItems();return;}
   if(el.name==='deposit'&&el.closest('#deposit-interest-form')){const d=state.wallets.find(w=>w.id===el.value);const dest=el.closest('form').querySelector('[name=creditWallet]');if(d&&dest)dest.innerHTML=walletOptions(d.id,w=>w.currency===d.currency);return;}
@@ -1033,6 +1143,12 @@ function bind(){
   if(e.target.id==='tx-search'){state.txFilters.search=e.target.value;state.maxTx=100;$('#global-search').value=e.target.value;$('#tx-list').innerHTML=transactionList();}
   if(e.target.id==='global-search'){state.txFilters.search=e.target.value;state.maxTx=100;if(state.page!=='transactions')setPage('transactions');else $('#tx-list').innerHTML=transactionList();}
   if(e.target.id==='category-manager-search'){state.catUI.search=e.target.value;$('#categories-results').innerHTML=categoryManagerItems();}
+  if(e.target.id==='house-subproject-search')houseSubprojectChoices(e.target.value,e.target.closest('#tx-form'));
+  if(e.target.id==='house-project-search'){
+   state.houseUI.search=e.target.value;
+   const rows=state.transactions.filter(t=>t.projectId==='home'&&t.type==='expense').sort(sortTx);
+   const list=$('#house-subproject-grid'),history=$('#house-operation-list');if(list)list.innerHTML=houseSubprojectList(rows);if(history)history.innerHTML=houseOperationRows(rows);
+  }
   if(e.target.id==='quick-category-search'){$('#quick-category-grid').innerHTML=quickCategoryItems(e.target.value);}
  });
  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal(); if(e.target.closest('#tx-form')&&!e.target.closest('.tx-extra')&&(e.key===','||e.key==='.'||/^[0-9]$/.test(e.key)||e.key==='Backspace')){e.preventDefault();useKeypadKey(e.key==='Backspace'?'back':e.key==='.'?',':e.key);return;} if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-action=select-month]')){e.preventDefault();e.target.click();}});

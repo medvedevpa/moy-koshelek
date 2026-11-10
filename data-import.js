@@ -44,7 +44,9 @@ export function validateBackup(data) {
   if (new Set(data.transactions.map(t => t.id)).size !== data.transactions.length) {
     throw new Error('В копии повторяются идентификаторы операций.');
   }
-  if (data.budgets.some(b => !b || typeof b.id !== 'string' || !b.id || !walletIds.has(b.walletId))) {
+  if (data.budgets.some(b => !b || typeof b.id !== 'string' || !b.id ||
+      (b.walletId ? !walletIds.has(b.walletId) : !['houseProject','houseTaxonomy','recurring'].includes(b.kind)) ||
+      (b.kind === 'houseTaxonomy' && (!Array.isArray(b.sections) || !Array.isArray(b.subprojects))))) {
     throw new Error('В копии найдены некорректные бюджеты.');
   }
   return {wallets:data.wallets.length, categories:data.categories.length, transactions:data.transactions.length, budgets:data.budgets.length};
