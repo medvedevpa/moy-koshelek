@@ -1,5 +1,5 @@
-const CACHE = 'moy-koshelek-app-v11-import';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './cloud.js', './db.js', './import.js', './ocr.js', './data-import.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'moy-koshelek-app-v13-premium';
+const ASSETS = ['./', './index.html', './style.css', './premium.css', './assets/logo-light.webp', './assets/logo-night.webp', './assets/our-house.webp', './app.js', './cloud.js', './db.js', './import.js', './ocr.js', './data-import.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
@@ -17,5 +17,5 @@ self.addEventListener('fetch', event => {
     }).catch(() => caches.match(event.request).then(cached => cached || caches.match('./index.html'))));
     return;
   }
-  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+  event.respondWith(fetch(event.request).then(r=>{if(r.ok){const copy=r.clone();caches.open(CACHE).then(c=>c.put(event.request,copy)).catch(()=>{});}return r;}).catch(()=>caches.match(event.request)));
 });

@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>Мой кошелёк</title>
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css" /><link rel="stylesheet" href="./premium.css" />
 </head>
 <body>
 <!-- Locally defined line icons: no icon font, account, or external dependency. -->
@@ -32,22 +32,22 @@
 </svg>
 <div class="shell">
   <aside class="sidebar">
-    <div class="brand"><div class="brand-mark"><svg class="ico"><use href="#i-wallet"/></svg></div><div>Мой кошелёк<small>Финансы без рекламы</small></div></div>
+    <div class="brand"><img class="aside-brand" src="./assets/logo-light.webp" alt="Логотип семейного кошелька"><div>Мой кошелёк<small>Семейные финансы</small></div></div>
     <nav class="side-nav" aria-label="Основная навигация">
       <button data-page="dashboard" class="nav active"><svg class="ico"><use href="#i-home"/></svg>Главная</button>
       <button data-page="accounts" class="nav"><svg class="ico"><use href="#i-wallet"/></svg>Счета</button>
       <button data-page="overview" class="nav"><svg class="ico"><use href="#i-chart"/></svg>Обзор</button>
-      <button data-page="budgets" class="nav"><svg class="ico"><use href="#i-budget"/></svg>Бюджеты</button>
+      <button data-page="house" class="nav"><span class="nav-emoji">⌂</span>Наш дом</button>
       <button data-page="settings" class="nav"><svg class="ico"><use href="#i-more"/></svg>Больше</button>
     </nav>
     <div class="aside-foot"><span class="offline-dot"></span> История на устройстве<br/><small>Резервные копии — в разделе «Больше»</small></div>
   </aside>
   <main class="main">
-    <header class="topbar">
-      <div class="top-title"><div class="eyebrow">МОИ ФИНАНСЫ</div><h1 id="page-title">Главная</h1></div>
-      <div class="top-actions">
+    <header class="topbar premium-topbar">
+      <div class="premium-branding"><img id="brand-mascot" class="premium-mascot" src="./assets/logo-light.webp" alt="Семейный логотип"/><div class="premium-brand-copy"><div class="premium-brand-sub" id="brand-profile-sub">Личный бюджет</div><h1 id="brand-profile-title">Мой кошелёк</h1><div class="premium-header-page" id="page-title">Главная</div></div></div>
+      <div class="top-actions premium-actions">
         <label class="search-pill" for="global-search"><svg class="ico"><use href="#i-search"/></svg><input id="global-search" type="search" placeholder="Поиск операций" aria-label="Поиск операций" autocomplete="off"/></label>
-        <button class="filter-round" id="open-filters" aria-label="Фильтры операций" title="Фильтры операций"><svg class="ico"><use href="#i-filter"/></svg></button>
+        <button class="filter-round" id="open-filters" aria-label="Поиск и фильтры операций" title="Поиск и фильтры операций"><svg class="ico"><use href="#i-search"/></svg></button>
         <select aria-label="Выбранный кошелёк" id="wallet-picker"></select>
       </div>
     </header>
@@ -60,7 +60,7 @@
   <button data-page="dashboard" class="active"><svg class="ico"><use href="#i-home"/></svg><span>Главная</span></button>
   <button data-page="accounts"><svg class="ico"><use href="#i-wallet"/></svg><span>Счета</span></button>
   <button data-page="overview"><svg class="ico"><use href="#i-chart"/></svg><span>Обзор</span></button>
-  <button data-page="budgets"><svg class="ico"><use href="#i-budget"/></svg><span>Бюджеты</span></button>
+  <button data-page="house"><svg class="ico"><use href="#i-home"/></svg><span>Наш дом</span></button>
   <button data-page="settings"><svg class="ico"><use href="#i-more"/></svg><span>Больше</span></button>
 </nav>
 <div id="modal-root"></div><div id="toast" role="status" aria-live="polite"></div>

@@ -27,7 +27,8 @@ const profilePref=()=>{try{return localStorage.getItem(FAMILY_KEY)||'me';}catch{
 const DEVICE_KEY='moy-koshelek-device-owner-v8';
 const devicePref=()=>{try{return localStorage.getItem(DEVICE_KEY)||'me';}catch{return 'me';}};
 const saveLocal=(key,value)=>{try{localStorage.setItem(key,value);}catch{}};
-const OWNERS={me:'Мой',wife:'Жены',family:'Семья'};
+const OWNERS={me:'Мой',wife:'Жены',matvey:'Матвей',family:'Семья'};
+const PROFILE_LOOK={me:{name:'Мой кошелёк',sub:'Личный бюджет',emoji:'🌙',theme:'night'},wife:{name:'Кошелёк жены',sub:'Личный бюджет',emoji:'🌸',theme:'rose'},matvey:{name:'Кошелёк Матвея',sub:'Накопления и расходы',emoji:'🧸',theme:'aqua'},family:{name:'Семейный бюджет',sub:'Общий кошелёк',emoji:'💚',theme:'mint'}};
 let state = { wallets:[], categories:[], transactions:[], budgets:[], page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
 
 function wallet() {
@@ -35,8 +36,8 @@ function wallet() {
  if(picked&&(state.profileId==='family'||ownerOfWallet(picked)===state.profileId))return picked;
  return state.wallets.find(w=>state.profileId!=='family'&&ownerOfWallet(w)===state.profileId&&w.currency==='RUB')||state.wallets.find(w=>w.currency==='RUB')||state.wallets[0];
 }
-function ownerOfWallet(w){return w?.ownerId==='wife'?'wife':'me';}
-function ownerOfTx(t){return t.ownerId==='wife'||t.ownerId==='me'?t.ownerId:ownerOfWallet(state.wallets.find(w=>w.id===t.walletId));}
+function ownerOfWallet(w){return ['me','wife','matvey','family'].includes(w?.ownerId)?w.ownerId:'me';}
+function ownerOfTx(t){return ['me','wife','matvey','family'].includes(t?.ownerId)?t.ownerId:ownerOfWallet(state.wallets.find(w=>w.id===t.walletId));}
 function scopeMatches(t){return state.profileId==='family'||ownerOfTx(t)===state.profileId;}
 function walletCurrencyMatches(t,w){return (state.wallets.find(x=>x.id===t.walletId)?.currency||'RUB')===w.currency;}
 function visibleTx(t,w){return scopeMatches(t)&&walletCurrencyMatches(t,w);}
@@ -45,12 +46,16 @@ function displayDelta(t,w){
  if(t.type==='expense')return -netExpense(t);
  return 0; // Переводы не являются семейным доходом или расходом.
 }
-function ownerOptions(selected='me',family=false){return ['me','wife',...(family?['family']:[])].map(id=>opt(id,OWNERS[id],selected===id)).join('');}
-function profileBar(){return `<div class="profile-bar" role="group" aria-label="Чей бюджет показывать">${['me','wife','family'].map(id=>`<button class="profile-option ${state.profileId===id?'current':''}" data-action="select-profile" data-id="${id}">${id==='me'?'🌙':id==='wife'?'🌸':'🏠'} ${OWNERS[id]}</button>`).join('')}</div>`;}
+function ownerOptions(selected='me',family=false){return ['me','wife','matvey',...(family?['family']:[])].map(id=>opt(id,OWNERS[id],selected===id)).join('');}
+function profileBar(){return `<div class="profile-bar premium-switch" role="group" aria-label="Выбрать бюджет">${['me','wife','matvey','family'].map(id=>`<button class="profile-option ${state.profileId===id?'current':''}" data-action="select-profile" data-id="${id}" aria-pressed="${state.profileId===id}"><span class="profile-emoji">${PROFILE_LOOK[id].emoji}</span><span>${OWNERS[id]}</span></button>`).join('')}</div>`;}
 function applyTheme(){
- const theme=(state.profileId==='family'?state.deviceOwner:state.profileId)==='wife'?'rose':'night';
+ const theme=PROFILE_LOOK[state.profileId]?.theme||'night';
  document.documentElement.dataset.theme=theme;
- document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='rose'?'#fff6f9':'#141b27');
+ document.querySelector('meta[name="theme-color"]')?.setAttribute('content',({night:'#171717',rose:'#fff0f5',mint:'#e8f8e7',aqua:'#e4f9fa'})[theme]);
+ const profile=PROFILE_LOOK[state.profileId]||PROFILE_LOOK.me;
+ const title=document.querySelector('#brand-profile-title');if(title)title.textContent=state.page==='house'?'Наш дом':profile.name;
+ const subtitle=document.querySelector('#brand-profile-sub');if(subtitle)subtitle.textContent=state.page==='house'?'Наш семейный проект':profile.sub;
+ const img=document.querySelector('#brand-mascot');if(img)img.src=state.profileId==='me'?'./assets/logo-night.webp':'./assets/logo-light.webp';
 }
 function cat(id) { return state.categories.find(c=>c.id===id); }
 function walletName(id) { return state.wallets.find(w=>w.id===id)?.name || 'Кошелёк'; }
@@ -65,7 +70,19 @@ function txDelta(t,w) {
   if (t.type==='transfer') return (t.toWalletId===w.id ? (t.toAmountMinor ?? t.amountMinor) : 0) - (t.walletId===w.id ? t.amountMinor : 0);
   return 0;
 }
-function balance(w, dateEnd=today()) {
+function balance(w,dateEnd=today()) {
+ if(w?.balanceAnchorAt && w?.balanceAnchorDate && dateEnd>=w.balanceAnchorDate && Number.isSafeInteger(w.balanceAnchorMinor)){
+  return w.balanceAnchorMinor+state.transactions.reduce((sum,t)=>{
+   if(t.walletId!==w.id && t.toWalletId!==w.id)return sum;
+   // Control point is at the moment the actual bank balance was entered.
+   // Pre-imported records, including transactions from the same date, cannot count again.
+   if(t.date<w.balanceAnchorDate)return sum;
+   if(t.date===w.balanceAnchorDate && (!t.createdAt || t.createdAt<=w.balanceAnchorAt))return sum;
+   if(t.date>dateEnd)return sum;
+   if(t.type==='expense'&&t.walletId===w.id)return sum-t.amountMinor+(t.cashbackStatus==='received'?benefit(t):0);
+   return sum+txDelta(t,w);
+  },0);
+ }
  return (w.initialBalanceMinor||0)+state.transactions.reduce((sum,t)=>{
    if(t.type==='expense'&&t.walletId===w.id) return sum-(t.date<=dateEnd?t.amountMinor:0)+settledCashback(t,dateEnd);
    return sum+(t.date<=dateEnd?txDelta(t,w):0);
@@ -91,25 +108,29 @@ async function loadData(){
     const spouse={id:uid(),name:'Карта жены',ownerId:'wife',currency:'RUB',initialBalanceMinor:0};
     await save('wallets',spouse);state.wallets.push(spouse);
   }
+  if(!state.wallets.some(w=>ownerOfWallet(w)==='matvey')){
+    const child={id:'wallet-matvey-default-v13',name:'Копилка Матвея',ownerId:'matvey',currency:'RUB',kind:'savings',initialBalanceMinor:0};
+    await save('wallets',child);state.wallets.push(child);
+  }
   if(!categories.length){
     const seed=[{id:uid(),name:'Другое',type:'income',color:'#50b9a1'},{id:uid(),name:'Другое',type:'expense',color:'#e66b80'}];
     await insertMany('categories',seed);state.categories=seed;
   }
   if (!state.wallets.some(w=>w.id===state.walletId)) state.walletId=state.wallets[0].id;
   // Legacy Spendee backup has no owner fields: all historic rows remain assigned to "Мой".
-  if(!['me','wife','family'].includes(state.profileId))state.profileId='me';
+  if(!['me','wife','matvey','family'].includes(state.profileId))state.profileId='me';
   if(!['me','wife'].includes(state.deviceOwner))state.deviceOwner='me';
 }
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('visible'),3500);}
 function render(){
-  const titles={dashboard:'Главная',accounts:'Счета',overview:'Обзор',transactions:'История',budgets:'Бюджеты',settings:'Больше'};
+  const titles={dashboard:'Главная',accounts:'Счета',overview:'Обзор',house:'Наш дом',transactions:'История',budgets:'Бюджеты',settings:'Больше'};
   $('#page-title').textContent=titles[state.page]||'Мой кошелёк';
   applyTheme();
   $('#profile-switch').innerHTML=profileBar();
   $('#wallet-picker').innerHTML=walletOptions(wallet()?.id);
   $('#global-search').value=state.txFilters.search;
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===state.page||(state.page==='transactions'&&b.dataset.page==='dashboard')));
-  const pages={dashboard:renderDashboard,accounts:renderAccounts,overview:renderOverview,transactions:renderTransactions,budgets:renderBudgets,settings:renderSettings};
+  const pages={dashboard:renderDashboard,accounts:renderAccounts,overview:renderOverview,house:renderHomeProject,transactions:renderTransactions,budgets:renderBudgets,settings:renderSettings};
   $('#content').innerHTML=pages[state.page]();
 }
 function monthlyTotals(w,month){
@@ -162,39 +183,84 @@ function groupedOperations(items,w,maxItems=100){
     return `<section class="activity-day"><div class="day-header"><span>${esc(dayTitle(date))}</span><span>${esc(format(net,w.currency))}</span></div><div class="day-operations">${dayContent}</div></section>`;
   }).join('');
 }
+function profileWallets(){return state.wallets.filter(w=>(state.profileId==='family'||ownerOfWallet(w)===state.profileId)&&w.currency==='RUB'&&w.status!=='closed');}
+function portfolio(){return profileWallets().reduce((sum,w)=>sum+balance(w),0);}
+function knownBalance(){return profileWallets().length>0&&profileWallets().every(w=>Boolean(w.balanceAnchorAt));}
+function themedBarChart(type='expense'){
+ const w=wallet(),current=today().slice(0,7),anchor=state.focusMonth>=moveMonth(current,-5)?current:state.focusMonth;
+ const months=Array.from({length:6},(_,i)=>moveMonth(anchor,i-5));
+ const data=months.map(month=>({month,...monthlyTotals(w,month)}));
+ const top=Math.max(1,...data.map(x=>x[type]));
+ return `<div class="lux-chart" role="group" aria-label="Выбрать месяц">${data.map(d=>{
+ const height=d[type]===0?0:Math.max(7,Math.round(d[type]/top*100));const current=d.month===state.focusMonth;
+ return `<button class="lux-chart-month ${current?'chosen':''}" data-action="select-month" data-month="${d.month}" title="${esc(monthTitle(d.month))}: ${esc(format(d[type],w.currency))}"><span class="lux-chart-value">${current?esc(format(d[type],w.currency)):''}</span><span class="lux-bar-shell"><span class="lux-bar" style="height:${height}%"></span></span><span class="lux-chart-label">${esc(new Date(d.month+'-01T12:00:00').toLocaleDateString('ru-RU',{month:'short'}).replace('.',''))}</span></button>`;}).join('')}</div>`;
+}
+function premiumTransactionRows(rows,limit=5){
+ const w=wallet(),r=[...rows].filter(t=>walletCurrencyMatches(t,w)&&t.type!=='transfer').sort(sortTx).slice(0,limit);
+ if(!r.length)return `<div class="premium-empty">Операций пока нет <button class="text-action" data-action="add-tx">Добавить первую</button></div>`;
+ return r.map(t=>{const c=cat(t.categoryId),delta=displayDelta(t,w);
+ return `<button class="lux-tx-row" data-action="edit-tx" data-id="${esc(t.id)}"><span class="lux-tx-icon">${c?iconForCategory(c):t.type==='income'?'💰':'🧾'}</span><span class="lux-tx-info"><b>${esc(c?.name||'Без категории')}</b><small>${esc(shortDate(t.date))}${t.projectId==='home'?' · 🏡 Дом':''}${benefit(t)>0?' · 🎁 +'+esc(format(benefit(t))):''}</small></span><strong class="${delta>=0?'positive':'negative'}">${delta>0?'+':''}${esc(format(delta,w.currency))}</strong></button>`;
+ }).join('');
+}
+function accountVisual(w){return w.kind==='deposit'?'🏦':w.kind==='savings'?'🌱':w.kind==='cash'?'💵':ownerOfWallet(w)==='wife'?'💗':ownerOfWallet(w)==='matvey'?'🧸':'💳';}
+function premiumAccountCards(limit=6){return profileWallets().slice(0,limit).map(w=>`<button class="lux-account-tile" data-action="edit-wallet" data-id="${esc(w.id)}"><span class="lux-account-symbol">${accountVisual(w)}</span><span class="lux-account-name">${esc(w.name)}</span><strong>${esc(format(balance(w),w.currency))}</strong>${w.kind==='deposit'?`<small>${Number(w.rate||0)}% годовых</small>`:''}</button>`).join('');}
 function renderDashboard(){
-  const w=wallet(),month=state.focusMonth,{income,expense}=monthlyTotals(w,month),net=income-expense;
-  const recent=state.transactions.filter(t=>isWalletTx(t,w)&&t.date<=today()).sort(sortTx).slice(0,16);
-  const todaySpent=sumType(state.transactions.filter(t=>t.date===today()),'expense',w);
-  const todayCashback=cashbackTotals(state.transactions.filter(t=>t.date===today()),w).cashback;
-  const monthlyCashback=cashbackTotals(state.transactions.filter(t=>t.date.startsWith(month)),w).cashback;
-  const nextAvailable=month<today().slice(0,7);
-  return `<div class="home-screen">
-    <section class="home-summary" aria-label="Денежный поток за ${esc(monthTitle(month))}">
-      <div class="hero-main"><div class="net-title"><div class="net-number">${esc(format(net,w.currency))}</div><div class="net-caption">Денежный поток · ${esc(monthTitle(month,true))}</div></div>
-      <div class="flow-totals"><span class="inflow">${svgIcon('up')} ${esc(format(income,w.currency))}</span><span class="outflow">${svgIcon('down')} ${esc(format(expense,w.currency))}</span></div></div>
-      <div class="home-cashback">🎁 Выгода от кешбэка: <strong>${esc(format(monthlyCashback,w.currency))}</strong></div><div class="chart-wrap">${cashFlowChart(w)}</div>
-      <div class="month-navigation"><button data-action="prev-month" aria-label="Предыдущий месяц">${svgIcon('chevron','flip')}<span>${esc(monthTitle(moveMonth(month,-1)))}</span></button>
-      <button class="selected-month" data-action="current-month" title="Вернуться к текущему месяцу">${esc(monthTitle(month,true))}${month===today().slice(0,7)?'<span class="now-badge">Этот месяц</span>':''}</button>
-      <button data-action="next-month" aria-label="Следующий месяц" ${nextAvailable?'':'disabled'}><span>${nextAvailable?esc(monthTitle(moveMonth(month,1))):' '}</span>${svgIcon('chevron')}</button></div>
-    </section>
-    <div class="home-quick"><button class="quick-scan" data-action="scan-expense">${svgIcon('camera')} Добавить расход по скриншоту</button><span class="daily-spent">Сегодня потрачено: ${esc(format(todaySpent,w.currency))}${todayCashback?` · кешбэк +${esc(format(todayCashback,w.currency))}`:''}</span></div>
-    <section class="home-activity"><div class="activity-heading"><h2>Последние операции</h2><button data-action="show-transactions">Все операции ${svgIcon('chevron')}</button></div>${groupedOperations(recent,w,16)}</section>
-    <div class="data-footnote">${state.transactions.length?`В базе ${state.transactions.length.toLocaleString('ru-RU')} операций`:'История Spendee загружается в разделе «Больше»'} · данные сохраняются в браузере</div>
-  </div>`;
+ const w=wallet(),p=PROFILE_LOOK[state.profileId],month=state.focusMonth,{income,expense}=monthlyTotals(w,month);
+ const spentToday=sumType(state.transactions.filter(t=>t.date===today()),'expense',w);
+ const cash=cashbackTotals(state.transactions.filter(t=>t.date.startsWith(month)),w).cashback;
+ const transactions=state.transactions.filter(t=>scopeMatches(t)&&t.date<=today());
+ const isFamily=state.profileId==='family',isKid=state.profileId==='matvey';
+ const houseRows=state.transactions.filter(t=>t.projectId==='home'&&t.type==='expense');
+ const plannedRecurring=state.budgets.filter(b=>b.kind==='recurring'&&b.ownerId==='matvey');
+ return `<div class="lux-dashboard">
+ <section class="lux-hero lux-panel"><div class="lux-eyebrow">${isFamily?'ВСЯ СЕМЬЯ':isKid?'КОШЕЛЁК МАТВЕЯ':'ЛИЧНЫЕ ФИНАНСЫ'} <span>✦</span></div><div class="lux-hero-title">${knownBalance()?'Актуальный баланс':'Расчётный баланс'}</div>
+ <div class="lux-balance">${esc(format(portfolio(),w.currency))}</div>
+ <div class="lux-hero-symbol" aria-hidden="true">${isKid?'🧸':isFamily?'💚':state.profileId==='wife'?'♡':'✦'}</div>
+ <div class="lux-stats"><button class="lux-metric metric-in" data-action="show-transactions"><small>↘ Доходы</small><b>+${esc(format(income,w.currency))}</b></button><button class="lux-metric metric-out" data-action="show-transactions"><small>↗ Расходы</small><b>−${esc(format(expense,w.currency))}</b></button><button class="lux-metric metric-cash"><small>🎁 Кешбэк</small><b>+${esc(format(cash,w.currency))}</b></button></div>
+ ${!knownBalance()?`<button class="lux-balance-hint" data-action="adjust-balances">Сверить с реальными счетами <span>›</span></button>`:''}</section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>${isKid?'Расходы Матвея':'Расходы по месяцам'}</h2><span class="lux-pill">${esc(monthTitle(month,true))}</span></div>${themedBarChart('expense')}<div class="lux-chart-footer"><button data-action="prev-month">‹ Раньше</button><button data-action="current-month">Текущий месяц</button><button data-action="next-month" ${month>=today().slice(0,7)?'disabled':''}>Позже ›</button></div></section>
+ ${isKid?`<section class="lux-panel lux-section"><div class="lux-section-head"><h2>Регулярные расходы</h2><button class="text-action" data-action="add-recurring">+ Добавить</button></div>${plannedRecurring.length?plannedRecurring.slice(0,4).map(b=>`<button class="lux-mini-row" data-action="pay-recurring" data-id="${esc(b.id)}"><span>🧸 ${esc(b.name)}</span><strong>${esc(format(b.limitMinor))} / мес.</strong></button>`).join(''):'<p class="muted small-text">Садик, кружки, занятия — можно настроить ежемесячные платежи.</p>'}</section>`:''}
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Последние операции</h2><button class="text-action" data-action="show-transactions">Все ›</button></div>${premiumTransactionRows(transactions,isKid?4:5)}<div class="lux-quick-actions"><button data-action="add-tx">＋ Записать операцию</button><button data-action="scan-expense">📷 Со скриншота</button></div></section>
+ ${isFamily?`<section class="lux-panel lux-section"><div class="lux-section-head"><h2>Кошельки семьи</h2><button class="text-action" data-page="accounts">Счета ›</button></div><div class="lux-family-tiles">${['me','wife','matvey','family'].map(id=>`<button data-action="select-profile" data-id="${id}"><span>${PROFILE_LOOK[id].emoji}</span><b>${OWNERS[id]}</b><strong>${esc(format(state.wallets.filter(w=>ownerOfWallet(w)===id&&w.currency==='RUB'&&w.status!=='closed').reduce((sum,w)=>sum+balance(w),0)))}</strong></button>`).join('')}</div></section>`:
+ `<section class="lux-panel lux-section"><div class="lux-section-head"><h2>${isKid?'Копилка и накопления':'Счета и накопления'}</h2><button class="text-action" data-page="accounts">Управлять ›</button></div><div class="lux-account-grid">${premiumAccountCards(3)}</div></section>`}
+ ${houseRows.length||isFamily?`<button class="lux-house-preview lux-panel" data-page="house"><img src="./assets/our-house.webp" alt="Эскиз нашего дома" loading="lazy"><span><b>Наш дом</b><small>${houseRows.length} операций по проекту · ${esc(format(houseRows.reduce((sum,t)=>sum+netExpense(t),0)))}</small></span><span>›</span></button>`:''}
+ </div>`;
 }
 function renderAccounts(){
-  return `<div class="page-section"><div class="section-title"><h2>Мои счета</h2><div class="inline-actions"><button class="btn small" data-action="add-deposit">+ Вклад</button><button class="btn primary small" data-action="add-wallet">+ Счёт</button></div></div>
-   <p class="tiny muted">Баланс рассчитан из всех записанных операций и начального остатка. Исторические доходы из Spendee не обязательно отражают сумму на реальном банковском счёте.</p>
-   <div class="account-cards">${state.wallets.filter(w=>state.profileId==='family'||ownerOfWallet(w)===state.profileId).map(w=>`<div class="account-card ${w.id===wallet()?.id?'selected':''}"><div class="account-head"><span class="account-symbol">${svgIcon('wallet')}</span><div><div class="account-name">${esc(w.name)}</div><div class="account-currency">${esc(w.currency)} · ${esc(OWNERS[ownerOfWallet(w)])}${w.kind==='deposit'?' · вклад':''}</div></div></div>    <div class="account-balance">${esc(format(balance(w),w.currency))}</div>${w.kind==='deposit'?`<div class="deposit-small">${w.status==='closed'?'Архив · не текущий остаток · ':''}${esc(w.bank||'Банк не указан')} · ${Number(w.rate||0)}% годовых · до ${esc(w.maturityDate?shortDate(w.maturityDate):'бессрочно')}</div>`:''}<div class="account-actions"><button class="btn small ${w.id===wallet()?.id?'primary':''}" data-action="choose-wallet" data-id="${esc(w.id)}">${w.id===wallet()?.id?'Выбран':'Выбрать'}</button><button class="btn small" data-action="edit-wallet" data-id="${esc(w.id)}">Изменить</button></div></div>`).join('')}</div>
-   <section class="panel deposit-help"><div class="panel-header"><h2>Вклады и проценты</h2><button class="btn small" data-action="download-deposit-template">Скачать шаблон CSV</button></div>
-   <p class="tiny muted">Вклад — отдельный счёт, а не доход. Доходом считаются только полученные проценты. Старые и текущие вклады можно добавить вручную или импортировать списком из CSV.</p>
-   <div class="inline-actions"><button class="btn primary small" data-action="add-deposit">+ Новый вклад</button><button class="btn small" data-action="add-interest">+ Начисление процентов</button></div>
-   <label class="field" style="margin-top:15px">Импорт списка вкладов (CSV)<input type="file" id="deposit-csv-file" accept=".csv,text/csv" /></label>
-   <p class="tiny muted">Начальный остаток вклада не прибавляется к доходам. Если деньги были переведены с другой карты, учти этот перевод отдельно, чтобы не увеличить общие активы дважды.</p></section>
-   <section class="panel account-help"><h2>Расходы по скриншоту</h2><p class="tiny muted">Сфотографируйте банковскую операцию, проверьте распознанную сумму и сохраните расход в выбранный счёт.</p><button class="btn primary" data-action="scan-expense">${svgIcon('camera')} Сканировать операцию</button></section>
-  </div>`;
+ const accounts=profileWallets(),anyAnchored=accounts.some(w=>w.balanceAnchorAt),w=wallet();
+ return `<div class="lux-dashboard"><section class="lux-hero lux-panel accounts-hero"><div class="lux-eyebrow">СЧЕТА И НАКОПЛЕНИЯ ✦</div><div class="lux-hero-title">${knownBalance()?'Текущий баланс':'Расчётный баланс'}</div><div class="lux-balance">${esc(format(portfolio(),w.currency))}</div><div class="lux-hero-symbol">✧</div><p class="lux-account-advice">${knownBalance()?'Остатки сверены с реальными счетами':'После импорта истории лучше указать реальные остатки'}</p></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Мои счета</h2><button class="text-action" data-action="add-wallet">＋ Новый</button></div><div class="lux-account-list">${accounts.map(a=>`<div class="lux-account-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>${esc(OWNERS[ownerOfWallet(a)])}${a.kind==='deposit'?' · вклад '+Number(a.rate||0)+'%':''}${a.balanceAnchorAt?' · ✓ сверено':''}</small></span><strong>${esc(format(balance(a),a.currency))}</strong><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Изменить счёт">›</button></div>`).join('')}</div><button class="lux-main-button" data-action="adjust-balances">✓ Актуализировать остатки</button></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Вклады и накопления</h2><button class="text-action" data-action="add-deposit">+ Добавить</button></div>${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').length?`<div class="lux-account-grid">${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').map(a=>`<button class="lux-account-tile" data-action="edit-wallet" data-id="${esc(a.id)}"><span class="lux-account-symbol">${accountVisual(a)}</span><span class="lux-account-name">${esc(a.name)}</span><strong>${esc(format(balance(a),a.currency))}</strong>${a.rate?`<small>${Number(a.rate)}% годовых</small>`:''}</button>`).join('')}</div>`:'<div class="premium-empty">Добавьте вклад или накопительный счёт</div>'}<div class="lux-quick-actions"><button data-action="add-interest">＋ Проценты по вкладу</button><button data-action="download-deposit-template">⇩ Шаблон CSV</button></div><details class="lux-extra-tools"><summary>Импорт вкладов и параметры</summary><label class="field">Загрузить список вкладов (CSV)<input type="file" id="deposit-csv-file" accept=".csv,text/csv"></label><p class="muted small-text">Вклад — это актив, а не доход. Процентные начисления учитываются отдельно.</p></details></section></div>`;
 }
+function renderHomeProject(){
+ const rows=state.transactions.filter(t=>t.projectId==='home'&&t.type==='expense').sort(sortTx);const total=rows.reduce((s,t)=>s+netExpense(t),0);
+ const month=state.focusMonth;const monthly=rows.filter(t=>t.date.startsWith(month)).reduce((s,t)=>s+netExpense(t),0);
+ const getSection=t=>t.houseSection||(/ипотек/i.test(cat(t.categoryId)?.name||'')?'mortgage':/материал|бетон|кирпич|окн/i.test((cat(t.categoryId)?.name||'')+' '+(t.note||''))?'materials':/работ|монтаж|строител/i.test(cat(t.categoryId)?.name||'')?'work':'other');
+ const sectionAmount=id=>rows.filter(t=>getSection(t)===id).reduce((s,t)=>s+netExpense(t),0);
+ const cfg=state.budgets.find(b=>b.id==='house-project-v1');const plan=cfg?.limitMinor||0;
+ const mortgage=cfg?.mortgageMonthlyMinor||0;
+ return `<div class="lux-dashboard house-screen"><section class="lux-panel lux-house-hero"><div class="lux-house-image"><img src="./assets/our-house.webp" alt="Эскиз нашего будущего дома"><div class="lux-house-image-label"><b>Наш дом</b><small>Семейный проект</small></div></div><div class="lux-house-metrics"><div><small>Потрачено</small><strong>${esc(format(total))}</strong></div><div><small>За ${esc(monthTitle(month))}</small><strong>${esc(format(monthly))}</strong></div><div><small>Ипотека / мес.</small><strong>${mortgage?esc(format(mortgage)):'—'}</strong></div></div></section>
+ <section class="lux-house-kpis"><div class="lux-house-kpi"><span>🏦</span><small>Ипотека</small><b>${esc(format(sectionAmount('mortgage')))}</b></div><div class="lux-house-kpi"><span>🧱</span><small>Материалы</small><b>${esc(format(sectionAmount('materials')))}</b></div><div class="lux-house-kpi"><span>👷</span><small>Работы</small><b>${esc(format(sectionAmount('work')))}</b></div><div class="lux-house-kpi"><span>⚡</span><small>Содержание</small><b>${esc(format(sectionAmount('utilities')))}</b></div></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Бюджет строительства</h2><button class="text-action" data-action="home-settings">Настроить ›</button></div><div class="lux-plan"><span>Потрачено: <b>${esc(format(total))}</b></span><span>План: <b>${plan?esc(format(plan)):'Не задан'}</b></span></div>${cfg?.mortgageDebtMinor?`<p class="muted small-text">Остаток ипотечного долга: <strong>${esc(format(cfg.mortgageDebtMinor))}</strong></p>`:''}${plan?`<div class="lux-progress"><span style="width:${Math.min(100,total/plan*100)}%"></span></div><p class="muted small-text">${Math.round(total/plan*100)}% плана · осталось ${esc(format(Math.max(0,plan-total)))}</p>`:'<p class="muted small-text">Можно указать ориентировочную сумму бюджета, но это необязательно.</p>'}</section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Расходы по дому</h2><button class="text-action" data-action="add-home-expense">＋ Расход</button></div>${premiumTransactionRows(rows,15)}<div class="lux-quick-actions"><button data-action="add-home-expense">＋ Добавить расход по дому</button><button data-action="home-settings">⚙ Ипотека и план</button></div></section></div>`;
+}
+function openBalanceAdjustment(){
+ const wallets=state.wallets.filter(w=>w.status!=='closed'&&w.currency==='RUB');
+ openModal('Актуализировать баланс',`<form id="balances-form"><p class="small-text muted">Введите реальные суммы по счетам. Старые операции останутся в истории, а новый баланс будет считаться от момента сверки.</p><div class="balance-adjust-list">${wallets.map(w=>`<label class="balance-adjust-row"><span><b>${esc(w.name)}</b><small>${esc(OWNERS[ownerOfWallet(w)])}</small></span><input inputmode="decimal" type="number" step="0.01" name="wallet_${esc(w.id)}" data-wallet-id="${esc(w.id)}" value="${(balance(w)/100).toFixed(2)}" required></label>`).join('')}</div><div class="tx-entry-actions"><button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить остатки</button></div></form>`);
+}
+async function saveBalanceAdjustment(form){
+ const entries=[...form.querySelectorAll('[data-wallet-id]')].map(input=>({w:state.wallets.find(x=>x.id===input.dataset.walletId),n:Math.round(Number(input.value)*100)}));
+ if(entries.some(x=>!x.w||!Number.isSafeInteger(x.n)))throw Error('Проверь суммы на счетах');
+ if(!confirm('Зафиксировать текущие остатки по всем указанным счетам? История операций останется без изменений.'))return;
+ const anchor=new Date().toISOString(),date=today();
+ for(const {w,n} of entries)await save('wallets',{...w,balanceAnchorMinor:n,balanceAnchorAt:anchor,balanceAnchorDate:date});
+ await loadData();closeModal();render();toast('Остатки актуализированы. История сохранена.');
+}
+function openHomeSettings(){const x=state.budgets.find(b=>b.id==='house-project-v1');openModal('Наш дом · настройки',`<form id="home-settings-form" class="form-grid"><label class="field wide">Плановый бюджет строительства<input name="plan" inputmode="decimal" type="number" min="0" step="0.01" value="${(x?.limitMinor||0)/100}"></label><label class="field">Ипотека в месяц<input name="mortgage" inputmode="decimal" type="number" min="0" step="0.01" value="${(x?.mortgageMonthlyMinor||0)/100}"></label><label class="field">Остаток долга по ипотеке<input name="debt" inputmode="decimal" type="number" min="0" step="0.01" value="${(x?.mortgageDebtMinor||0)/100}"></label><p class="small-text muted wide">Плановые платежи не создают реальных операций. Каждый расход записывается отдельно, чтобы не было двойного учёта.</p><div class="modal-actions wide"><button class="btn primary" type="submit">Сохранить</button></div></form>`);}
+async function saveHomeSettings(form){const f=new FormData(form);const amount=k=>Math.round(Number(f.get(k)||0)*100);const plan=amount('plan'),mortgage=amount('mortgage'),debt=amount('debt');if([plan,mortgage,debt].some(x=>!Number.isSafeInteger(x)||x<0))throw Error('Укажи корректные суммы');await save('budgets',{id:'house-project-v1',kind:'houseProject',ownerId:'family',name:'Наш дом',limitMinor:plan,mortgageMonthlyMinor:mortgage,mortgageDebtMinor:debt});await loadData();closeModal();render();toast('Настройки дома сохранены');}
+function openRecurring(){openModal('Ежемесячный расход Матвея',`<form id="recurring-form" class="form-grid"><label class="field wide">Название<input name="name" placeholder="Садик, кружок, развитие" required maxlength="80"></label><label class="field wide">Сумма в месяц<input name="amount" type="number" min="0.01" step="0.01" required></label><div class="modal-actions wide"><button class="btn primary" type="submit">Сохранить</button></div></form>`);}
+async function saveRecurring(form){const f=new FormData(form),value=Math.round(Number(f.get('amount'))*100),name=cleanName(f.get('name'));if(!name||!Number.isSafeInteger(value)||value<=0)throw Error('Проверь сумму');await save('budgets',{id:uid(),kind:'recurring',ownerId:'matvey',name,limitMinor:value});await loadData();closeModal();render();toast('Платёж добавлен в план');}
+
 function renderOverview(){
  const w=wallet(),rows=filteredByPeriod(w),income=sumType(rows,'income',w),expense=sumType(rows,'expense',w),cb=cashbackTotals(rows,w);
  return `<div class="page-section"><div class="section-title"><h2>Финансовый обзор</h2><select id="period-picker" aria-label="Период">${opt('month','Выбранный месяц',state.period==='month')}${opt('year','Этот год',state.period==='year')}${opt('all','Вся история',state.period==='all')}</select></div>
@@ -233,12 +299,12 @@ function transactionList(){
 }
 function renderTransactions(){ const f=state.txFilters;return `<section class="panel"><div class="panel-header"><h2>История операций</h2><div class="inline-actions"><button class="btn small" data-action="scan-expense">📷 Со скриншота</button><button class="btn primary small" data-action="add-tx">+ Новая</button></div></div>
   <div class="toolbar"><input id="tx-search" placeholder="Категория, заметка, метка…" value="${esc(f.search)}" autocomplete="off"/>
-  <select id="tx-kind">${opt('all','Все типы',f.kind==='all')}${opt('income','Доходы',f.kind==='income')}${opt('expense','Расходы',f.kind==='expense')}${opt('transfer','Переводы',f.kind==='transfer')}</select>
+  <select id="tx-kind">${opt('all','Все типы',f.kind==='all')}${opt('income','Доходы',f.kind==='income')}${opt('expense','Расходы',f.kind==='expense')}</select>
   <select id="tx-category">${categoryOptions('all',f.category,true)}</select></div>
   <div class="toolbar"><input id="tx-from" type="date" aria-label="Дата с" value="${esc(f.from)}"/><input id="tx-to" type="date" aria-label="Дата по" value="${esc(f.to)}"/><input id="tx-min" type="number" min="0" step="0.01" placeholder="Сумма от" value="${esc(f.min)}"/><input id="tx-max" type="number" min="0" step="0.01" placeholder="Сумма до" value="${esc(f.max)}"/><button class="btn small" data-action="clear-filters">Сбросить</button></div>
   <div id="tx-list">${transactionList()}</div></section>`; }
 function renderBudgets(){
-  const w=wallet(),currentMonth=today().slice(0,7),relevant=state.budgets.filter(b=>state.profileId==='family'||(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))===state.profileId);
+  const w=wallet(),currentMonth=today().slice(0,7),relevant=state.budgets.filter(b=>b.kind!=='houseProject'&&b.kind!=='recurring'&&(state.profileId==='family'||(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))===state.profileId));
   return `<section class="panel section-gap"><div class="panel-header"><div><h2>Лимиты расходов</h2><p class="tiny muted" style="margin:7px 0 0">Текущий месяц · по владельцу расхода, независимо от карты оплаты</p></div><button class="btn primary small" data-action="add-budget">+ Бюджет</button></div>
   ${relevant.length?relevant.map(b=>{
     const used=state.transactions.filter(t=>ownerOfTx(t)===(b.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b.walletId)))&&t.type==='expense'&&walletCurrencyMatches(t,w)&&t.date.startsWith(currentMonth)&&(!b.categoryId||t.categoryId===b.categoryId)).reduce((s,t)=>s+netExpense(t),0);
@@ -276,7 +342,7 @@ function renderSettings(){
  <div class="grid-two"><section class="panel"><div class="panel-header"><h2>Семейный бюджет и телефон</h2></div>
  <label class="field">Чей это телефон по умолчанию?<select id="device-owner">${ownerOptions(state.deviceOwner)}</select></label>
  <button class="btn" data-action="switch-device-profile">Показать свой бюджет</button></section>
- <section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><button class="btn" data-action="go-accounts">Перейти к счетам</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
+ <section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><button class="btn" data-action="go-accounts">Перейти к счетам</button><button class="btn" data-action="show-budgets">Лимиты расходов</button><button class="btn" data-page="house">Наш дом</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
  <section class="panel"><div class="panel-header"><h2>Категории</h2><button class="btn small" data-action="add-category">+ Категория</button></div><p class="tiny muted">${income} доходных · ${expense} расходных</p>
  <input id="category-search" type="search" placeholder="Поиск категории" aria-label="Поиск категории" style="width:100%;margin-bottom:12px"/><div class="category-list" id="category-list">${categoryList('')}</div></section>
  <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button></div></section>
@@ -325,31 +391,75 @@ function cashbackFormData(form,gross,existing=null){
          cashbackDate:existing?.cashbackStatus==='received'?existing.cashbackDate||existing.date:null};
 }
 
+function amountTextFromMinor(minor){
+ const whole=Math.floor((minor||0)/100),cents=Math.abs(minor||0)%100;
+ return cents?`${whole},${String(cents).padStart(2,'0')}`:String(whole);
+}
+function normalizeKeypadAmount(value){
+ const normalized=String(value||'').replace(/\s/g,'').replace('.',',').replace(/[^0-9,]/g,'');
+ const [whole='',fraction='']=normalized.split(',');
+ return `${(whole.replace(/^0+(?=\d)/,'')||'0').slice(0,12)}${normalized.includes(',')?','+fraction.slice(0,2):''}`;
+}
+function renderKeypadAmount(){
+ const input=$('#tx-form [name=amount]'),display=$('#keypad-value');if(!input||!display)return;
+ const value=normalizeKeypadAmount(input.value);input.value=value;
+ display.textContent=value.replace('.',',')+' ₽';
+ updateCashbackPreview($('#tx-form'),'gross');
+}
+function useKeypadKey(key){
+ const input=$('#tx-form [name=amount]');if(!input)return;
+ let v=String(input.value||'0').replace('.',',');
+ if(key==='back')v=v.slice(0,-1)||'0';
+ else if(key==='clear')v='0';
+ else if(key===','){if(!v.includes(','))v+=',';}
+ else if(/^\d$/.test(key)){if((v.split(',')[1]||'').length>=2&&v.includes(','))return;v=v==='0'?key:v+key;}
+ else return;
+ input.value=normalizeKeypadAmount(v);renderKeypadAmount();
+}
+function keypadMarkup(amountMinor=0){
+ const items=['1','2','3','4','5','6','7','8','9',',','0','back'];
+ return `<section class="tx-keypad-panel"><div class="tx-amount-caption">Сумма операции</div>
+ <div class="tx-big-amount" id="keypad-value" aria-live="polite">${esc(amountTextFromMinor(amountMinor))} ₽</div>
+ <div class="tx-keypad" aria-label="Ввести сумму">${items.map(x=>`<button type="button" class="tx-key ${x==='back'?'tx-key-back':''}" data-action="keypad-key" data-key="${x}" aria-label="${x==='back'?'Удалить цифру':x}">${x==='back'?'⌫':x}</button>`).join('')}</div>
+ </section>`;
+}
 function openTransaction(id,preferredType='expense',presetCategory=''){
  const t=state.transactions.find(x=>x.id===id);editingType=t?.type||preferredType;
+ const pendingRecurring=!t&&editingType==='expense'?state.pendingRecurring:null;
+ const homeDefault=Boolean(t?.projectId==='home'||(!t&&state.pendingHomeExpense));
  const w=state.wallets.find(x=>x.id===t?.walletId)||wallet();
- const body=`<div class="type-tabs">${['expense','income','transfer'].map((v,i)=>`<button type="button" class="type-tab ${editingType===v?'active':''}" data-action="type-tab" data-type="${v}">${['Расход','Доход','Перевод'][i]}</button>`).join('')}</div><form id="tx-form" data-id="${esc(t?.id||'')}">
- <div class="form-grid">${field('Сумма',`<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" value="${t?esc((t.amountMinor/100).toFixed(2)):''}" placeholder="0,00" required>`) }
- ${field('Дата',`<input name="date" type="date" value="${esc(t?.date||today())}" required>`) }
- ${field('Оплачено с карты / счёта',`<select name="wallet">${walletOptions(w.id)}</select>`) }
- ${field('Чей доход / расход',`<select name="owner">${ownerOptions(t?ownerOfTx(t):(state.profileId==='family'?state.deviceOwner:state.profileId))}</select>`) }
- ${cashbackFields(t)}
+ const category=state.categories.find(c=>c.id===(t?.categoryId||presetCategory));
+ const typeButtons=editingType==='transfer'?[['transfer','Перевод'],['expense','Расход'],['income','Доход']]:[['expense','Расход'],['income','Доход']];
+ const body=`<form id="tx-form" data-id="${esc(t?.id||'')}">
+ <div class="tx-entry-heading"><span class="tx-entry-icon">${category?iconForCategory(category):editingType==='income'?'↗':'↘'}</span>
+ <span class="tx-entry-category">${esc(category?.name||'Без категории')}</span>${homeDefault?'<span class="tx-home-badge">🏡 Дом</span>':''}</div>
+ <div class="type-tabs tx-entry-types">${typeButtons.map(([type,label])=>`<button type="button" class="type-tab ${editingType===type?'active':''}" data-action="type-tab" data-type="${type}">${label}</button>`).join('')}</div>
+ <input name="amount" type="hidden" value="${t?esc(amountTextFromMinor(t.amountMinor)):pendingRecurring?esc(amountTextFromMinor(pendingRecurring.limitMinor)):'0'}">
+ ${keypadMarkup(t?.amountMinor||pendingRecurring?.limitMinor||0)}
+ <div class="tx-entry-date"><span>Дата</span><input name="date" type="date" value="${esc(t?.date||today())}" required></div>
+ <details class="tx-extra" ${t?'open':''}><summary>Детали операции</summary><div class="tx-extra-content">
+ <label class="field ${editingType==='income'?'hidden':''}" id="tx-wallet-wrap">Оплачено с карты / счёта<select name="wallet">${walletOptions(w.id)}</select></label>
+ <label class="field" id="tx-owner-wrap">${editingType==='income'?'Чей доход':'Чей расход'}<select name="owner">${ownerOptions(t?ownerOfTx(t):(state.profileId==='family'?state.deviceOwner:state.profileId),true)}</select></label>
+ <div id="tx-cashback-container" class="${editingType==='expense'?'':'hidden'}">${cashbackFields(t)}</div>
  <div id="tx-category-wrap">${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions(editingType,t?.categoryId||presetCategory)}</select>`)}</div>
- <div class="field wide ${editingType==='transfer'?'':'hidden'}" id="tx-destination">${field('В какой кошелёк',`<select name="toWallet"><option value="">Выберите</option>${walletOptions(t?.toWalletId||'', x=>x.id!==w.id&&x.currency===w.currency)}</select>`)}</div>
- ${field('Заметка',`<input name="note" maxlength="500" value="${esc(t?.note||'')}" placeholder="Необязательно">`,true)}
- ${field('Метки через запятую',`<input name="labels" value="${esc((t?.labels||[]).join(', '))}" placeholder="Например: работа, поездка">`,true)}</div>
- <div class="modal-actions">${t?`<button type="button" class="btn danger" data-action="delete-tx" data-id="${esc(t.id)}">Удалить</button>`:''}<button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div></form>`;
+ <div class="field ${editingType==='transfer'?'':'hidden'}" id="tx-destination">${field('В какой кошелёк',`<select name="toWallet"><option value="">Выберите</option>${walletOptions(t?.toWalletId||'', x=>x.id!==w.id&&x.currency===w.currency)}</select>`)}</div>
+ ${field('Заметка',`<input name="note" maxlength="500" value="${esc(t?.note||pendingRecurring?.name||'')}" placeholder="Необязательно">`)}
+ <div id="tx-house-wrap" class="tx-house-field ${editingType==='expense'?'':'hidden'}"><label class="house-check"><input type="checkbox" name="houseProject" ${homeDefault?'checked':''}><span>🏡 Отнести к проекту «Наш дом»</span></label><label class="field">Раздел расходов<select name="houseSection">${[['other','Прочее'],['materials','Материалы'],['work','Работы'],['mortgage','Ипотека'],['utilities','Содержание']].map(([v,l])=>opt(v,l,t?.houseSection===v)).join('')}</select></label></div>
+ ${field('Метки',`<input name="labels" value="${esc((t?.labels||[]).join(', '))}" placeholder="Необязательно">`)}</div></details>
+ <div class="tx-entry-actions">${t?`<button type="button" class="btn danger" data-action="delete-tx" data-id="${esc(t.id)}">Удалить</button>`:''}<button class="btn primary" type="submit">Сохранить</button></div></form>`;
  openModal(t?'Изменить операцию':'Новая операция',body);
- if(editingType==='transfer') updateTransactionType();
- updateCashbackPreview($('#tx-form'),'init');
+ updateTransactionType(true);
+ renderKeypadAmount();
 }
-function updateTransactionType(){
+function updateTransactionType(preserveCategory=false){
  document.querySelectorAll('.type-tab').forEach(b=>b.classList.toggle('active',b.dataset.type===editingType));
- const wrap=$('#tx-category-wrap'),dest=$('#tx-destination');if(!wrap)return;
- wrap.classList.toggle('hidden',editingType==='transfer');dest.classList.toggle('hidden',editingType!=='transfer');
- const cb=$('#tx-cashback-wrap');if(cb)cb.classList.toggle('hidden',editingType!=='expense');
- const old=wrap.querySelector('select');if(old)old.innerHTML=`<option value="">Без категории</option>`+categoryOptions(editingType);
+ const wrap=$('#tx-category-wrap'),dest=$('#tx-destination'),w=$('#tx-wallet-wrap'),cb=$('#tx-cashback-container');if(!wrap)return;
+ wrap.classList.toggle('hidden',editingType==='transfer');dest?.classList.toggle('hidden',editingType!=='transfer');
+ w?.classList.toggle('hidden',editingType==='income');cb?.classList.toggle('hidden',editingType!=='expense');document.querySelector('#tx-house-wrap')?.classList.toggle('hidden',editingType!=='expense');
+ const ownerLabel=$('#tx-owner-wrap');if(ownerLabel)ownerLabel.firstChild.textContent=editingType==='income'?'Чей доход':'Чей расход';
+ const catInput=wrap.querySelector('select');if(catInput){const selected=preserveCategory?catInput.value:'';catInput.innerHTML='<option value="">Без категории</option>'+categoryOptions(editingType,selected);}
 }
+
 let quickType='income';
 const iconForCategory=c=>{
  const n=c.name.toLocaleLowerCase('ru');
@@ -379,13 +489,13 @@ function quickCategoryItems(query=''){
 function openQuickAdd(type='income'){
  quickType=type;
  openModal('Новая операция',`<div class="quick-categories">
-   <div class="category-tabs"><button data-action="quick-type" data-type="expense" class="${quickType==='expense'?'active':''}">Расходы</button><button data-action="quick-type" data-type="income" class="${quickType==='income'?'active':''}">Доходы</button><button data-action="quick-type" data-type="transfer" class="${quickType==='transfer'?'active':''}">Перевод</button></div>
+   <div class="category-tabs"><button data-action="quick-type" data-type="expense" class="${quickType==='expense'?'active':''}">Расходы</button><button data-action="quick-type" data-type="income" class="${quickType==='income'?'active':''}">Доходы</button></div>
    <label class="category-find">🔎 <input id="quick-category-search" type="search" autocomplete="off" placeholder="Найти категорию…" aria-label="Поиск категории" /></label>
    <div class="quick-category-meta">Сначала самые частые категории за всё время</div>
    <div class="quick-category-grid" id="quick-category-grid">${quickCategoryItems()}</div>
    <div class="quick-category-actions"><button class="btn" data-action="quick-no-category">Без категории</button><button class="btn" data-action="scan-expense">📷 Со скриншота</button></div>
  </div>`);
- if(type==='transfer')refreshQuickCategoryPicker();
+
 }
 function refreshQuickCategoryPicker(){
  const f=$('#quick-category-grid'),q=$('#quick-category-search');if(!f)return;
@@ -413,7 +523,7 @@ function openScreenshotExpense(){
  ${cashbackFields(null)}
  ${field('Дата',`<input required name="date" type="date" value="${today()}">`)}
  ${field('Оплачено с карты / счёта',`<select name="wallet">${walletOptions(w.id)}</select>`)}
- ${field('Чей расход',`<select name="owner">${ownerOptions(state.profileId==='family'?state.deviceOwner:state.profileId)}</select>`)}
+ ${field('Чей расход',`<select name="owner">${ownerOptions(state.profileId==='family'?state.deviceOwner:state.profileId,true)}</select>`)}
  ${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions('expense')}</select>`)}
  ${field('Магазин / заметка',`<input name="note" maxlength="500" placeholder="Например, продукты"/>`,true)}
  </div>
@@ -459,7 +569,7 @@ function openBudget(id){
  openModal(b?'Изменить бюджет':'Новый бюджет',`<form id="budget-form" data-id="${esc(id||'')}" class="form-grid">
  ${field('Название',`<input name="name" value="${esc(b?.name||'')}" placeholder="Например, маркетинг" required>`,true)}
  ${field('Лимит за месяц',`<input name="limit" type="number" min="0.01" step="0.01" inputmode="decimal" value="${b?esc(b.limitMinor/100):''}" required>`)}
- ${field('Для чьего бюджета',`<select name="owner">${ownerOptions(b?.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b?.walletId))||(state.profileId==='family'?state.deviceOwner:state.profileId))}</select>`)}
+ ${field('Для чьего бюджета',`<select name="owner">${ownerOptions(b?.ownerId||ownerOfWallet(state.wallets.find(x=>x.id===b?.walletId))||(state.profileId==='family'?state.deviceOwner:state.profileId),true)}</select>`)}
  ${field('Кошелёк-ориентир',`<select name="wallet">${walletOptions(b?.walletId||w.id)}</select>`)}
  ${field('Категория',`<select name="category">${opt('','Все расходы',!b?.categoryId)}${categoryOptions('expense',b?.categoryId||'')}</select>`,true)}
  <div class="modal-actions wide"><button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div></form>`);
@@ -469,7 +579,7 @@ function openWallet(id){
  openModal(w?'Редактировать кошелёк':'Новый кошелёк',`<form id="wallet-form" data-id="${esc(id||'')}" class="form-grid">
  ${field('Название',`<input name="name" value="${esc(w?.name||'')}" required>`,true)}
  ${field('Валюта',`<select name="currency" ${w?'disabled':''}>${['RUB','EUR','USD','GBP','KZT','BYN','UAH'].map(v=>opt(v,v,v===(w?.currency||'RUB'))).join('')}</select>`)}
- ${field('Владелец счёта',`<select name="owner">${ownerOptions(w?ownerOfWallet(w):(state.profileId==='family'?state.deviceOwner:state.profileId))}</select>`)}
+ ${field('Владелец счёта',`<select name="owner">${ownerOptions(w?ownerOfWallet(w):(state.profileId==='family'?state.deviceOwner:state.profileId),true)}</select>`)}
  ${field('Начальный баланс',`<input name="initial" type="number" step="0.01" value="${w?esc((w.initialBalanceMinor||0)/100):'0'}" required>`)}
  ${w?.kind==='deposit'?`${field('Банк',`<input name="bank" maxlength="80" value="${esc(w.bank||'')}" required>`)}${field('Ставка годовых, %',`<input name="rate" type="number" min="0" max="100" step="0.01" value="${esc(w.rate||0)}">`)}${field('Дата окончания',`<input name="maturityDate" type="date" value="${esc(w.maturityDate||'')}">`)}${field('Состояние',`<select name="status">${opt('open','Действует',w.status!=='closed')}${opt('closed','Архивный / закрыт',w.status==='closed')}</select>`)}`:''}
  <p class="tiny muted wide">Начальный баланс — сумма до первой внесённой операции. После импорта истории обычно равен 0, если данные полные.</p>
@@ -480,7 +590,7 @@ function openDeposit(){
  openModal('Новый вклад',`<form id="deposit-form" class="form-grid">
  ${field('Банк',`<input name="bank" maxlength="80" placeholder="Например, Т-Банк" required>`,true)}
  ${field('Название вклада',`<input name="name" maxlength="100" placeholder="Накопительный, Вклад на 6 месяцев" required>`,true)}
- ${field('Чей вклад',`<select name="owner">${ownerOptions(state.profileId==='family'?state.deviceOwner:state.profileId)}</select>`)}
+ ${field('Чей вклад',`<select name="owner">${ownerOptions(state.profileId==='family'?state.deviceOwner:state.profileId,true)}</select>`)}
  ${field('Валюта',`<select name="currency">${['RUB','EUR','USD'].map(c=>opt(c,c,c==='RUB')).join('')}</select>`)}
  ${field('Дата открытия',`<input name="openedAt" type="date" value="${today()}" required>`)}
  ${field('Дата окончания',`<input name="maturityDate" type="date">`)}
@@ -564,7 +674,7 @@ function openCategory(id){
 }
 async function submitTransaction(form){
  const data=new FormData(form),existing=state.transactions.find(t=>t.id===form.dataset.id);
- const amount=Math.round(Number(data.get('amount'))*100),w=state.wallets.find(x=>x.id===data.get('wallet'));
+ const amount=Math.round(Number(String(data.get('amount')).replace(',','.'))*100),w=state.wallets.find(x=>x.id===data.get('wallet'));
  if(!w||!Number.isSafeInteger(amount)||amount<=0) return toast('Укажите корректную сумму и кошелёк.');
  const date=String(data.get('date'));
  if(!parseDate(date))return toast('Неверная дата.');
@@ -572,8 +682,8 @@ async function submitTransaction(form){
  if(editingType==='transfer'&&(!dest||dest.id===w.id||dest.currency!==w.currency))return toast('Для перевода выберите другой кошелёк в той же валюте.');
  const cashback=editingType==='expense'?cashbackFormData(form,amount,existing):{cashbackMinor:0,cashbackStatus:'expected',cashbackDate:null};
  if(!cashback)return toast('Кешбэк должен быть от 0 до 100% стоимости покупки.');
- const item={...existing,...cashback,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,ownerId:String(data.get('owner')||state.deviceOwner),date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString()};
- await save('transactions',item);await loadData();closeModal();render();toast('Операция сохранена.');
+ const item={...existing,...cashback,id:existing?.id||uid(),walletId:w.id,toWalletId:editingType==='transfer'?dest.id:null,amountMinor:amount,toAmountMinor:editingType==='transfer'?amount:null,type:editingType,ownerId:String(data.get('owner')||state.deviceOwner),date,categoryId:editingType==='transfer'?null:String(data.get('category')||'')||null,note:cleanName(data.get('note')),labels:String(data.get('labels')||'').split(',').map(cleanName).filter(Boolean),createdAt:existing?.createdAt||new Date().toISOString(),projectId:editingType==='expense'&&data.get('houseProject')==='on'?'home':null,houseSection:editingType==='expense'&&data.get('houseProject')==='on'?String(data.get('houseSection')||'other'):null};
+ state.pendingHomeExpense=false;state.pendingRecurring=null;await save('transactions',item);await loadData();closeModal();render();toast('Операция сохранена.');
 }
 async function submitBudget(form){
  const f=new FormData(form),old=state.budgets.find(b=>b.id===form.dataset.id),limitMinor=Math.round(Number(f.get('limit'))*100);
@@ -710,7 +820,7 @@ async function doCSVImport(form){
 function bind(){
  document.addEventListener('click',async e=>{
   const nav=e.target.closest('[data-page]');if(nav){setPage(nav.dataset.page);return;}
-  if(e.target.closest('#floating-add')){openQuickAdd('income');return;}
+  if(e.target.closest('#floating-add')){state.pendingRecurring=null;state.pendingHomeExpense=false;openQuickAdd('income');return;}
   const el=e.target.closest('[data-action]');if(!el)return;
   const a=el.dataset.action,id=el.dataset.id;
   if(a==='backdrop'&&e.target!==el)return;
@@ -740,10 +850,16 @@ function bind(){
    }
    if(a==='cloud-sync'){const r=await cloud.sync();await loadData();render();toast(`Синхронизация завершена: ${r?.sent||0} изменений отправлено.`);return;}
 
+   if(a==='adjust-balances'){openBalanceAdjustment();return;}
+   if(a==='home-settings'){openHomeSettings();return;}
+   if(a==='add-home-expense'){state.pendingRecurring=null;state.pendingHomeExpense=true;openQuickAdd('expense');return;}
+   if(a==='add-recurring'){openRecurring();return;}
+   if(a==='pay-recurring'){const b=state.budgets.find(x=>x.id===id);if(b){state.pendingHomeExpense=false;state.pendingRecurring=b;openQuickAdd('expense');toast(`Плановый платёж: ${b.name}`)}return;}
+   if(a==='show-budgets'){setPage('budgets');return;}
    if(a==='show-transactions'){setPage('transactions');return;}
    if(a==='go-accounts'){setPage('accounts');return;}
    if(a==='select-profile'){
-    state.profileId=id;saveLocal(FAMILY_KEY,id);state.walletId=null;render();return;
+    if(!PROFILE_LOOK[id])return;state.profileId=id;saveLocal(FAMILY_KEY,id);state.walletId=null;render();return;
    }
    if(a==='switch-device-profile'){
     state.profileId=state.deviceOwner;state.walletId=null;saveLocal(FAMILY_KEY,state.profileId);render();return;
@@ -751,7 +867,7 @@ function bind(){
    if(a==='quick-type'){quickType=el.dataset.type;refreshQuickCategoryPicker();return;}
    if(a==='choose-quick-category'){const chosen=state.categories.find(c=>c.id===id&&c.type===quickType);if(chosen){closeModal();openTransaction(null,quickType,id);}return;}
    if(a==='quick-no-category'){closeModal();openTransaction(null,quickType);return;}
-   if(a==='quick-income'||a==='quick-expense'||a==='quick-transfer'){closeModal();openTransaction(null,a==='quick-income'?'income':a==='quick-transfer'?'transfer':'expense');return;}
+   if(a==='quick-income'||a==='quick-expense'){closeModal();openTransaction(null,a==='quick-income'?'income':'expense');return;}
    if(a==='add-deposit'){openDeposit();return;}
    if(a==='add-interest'){openDepositInterest();return;}
    if(a==='download-deposit-template'){downloadDepositTemplate();return;}
@@ -759,13 +875,14 @@ function bind(){
    if(a==='next-month'){if(state.focusMonth<today().slice(0,7))state.focusMonth=moveMonth(state.focusMonth,1);state.period='month';render();return;}
    if(a==='current-month'){state.focusMonth=today().slice(0,7);state.period='month';render();return;}
    if(a==='select-month'){if(el.dataset.month){state.focusMonth=el.dataset.month;state.period='month';render();}return;}
-   if(a==='add-tx'){openTransaction();return;}
+   if(a==='add-tx'){state.pendingRecurring=null;state.pendingHomeExpense=false;openQuickAdd('income');return;}
    if(a==='scan-expense'){closeModal();openScreenshotExpense();return;}
    if(a==='edit-tx'){openTransaction(id);return;}
    if(a==='delete-tx'){
     if(confirm('Удалить эту операцию без возможности отмены?')){await remove('transactions',id);await loadData();closeModal();render();toast('Операция удалена.');}return;
    }
-   if(a==='type-tab'){editingType=el.dataset.type;updateTransactionType();return;}
+   if(a==='type-tab'){editingType=el.dataset.type;updateTransactionType();const selected=$('#tx-form [name=category]')?.selectedOptions?.[0]?.textContent;const heading=$('.tx-entry-category');if(heading)heading.textContent=selected&&selected!=='Без категории'?selected:'Без категории';return;}
+   if(a==='keypad-key'){useKeypadKey(el.dataset.key);return;}
    if(a==='more-tx'){state.maxTx+=100;$('#tx-list').innerHTML=transactionList();return;}
    if(a==='clear-filters'){state.txFilters={search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''};state.maxTx=100;render();return;}
    if(a==='add-budget'){openBudget();return;}
@@ -781,7 +898,7 @@ function bind(){
   }catch(err){console.error(err);toast('Ошибка: '+err.message);}
  });
  document.addEventListener('submit',async e=>{
-  const f=e.target;if(!['tx-form','budget-form','wallet-form','category-form','import-form','ocr-expense-form','deposit-form','deposit-interest-form','cloud-auth-form','cloud-create-form','cloud-join-form'].includes(f.id))return;
+  const f=e.target;if(!['tx-form','budget-form','wallet-form','category-form','import-form','ocr-expense-form','deposit-form','deposit-interest-form','cloud-auth-form','cloud-create-form','cloud-join-form','balances-form','home-settings-form','recurring-form'].includes(f.id))return;
   e.preventDefault();const btn=f.querySelector('button[type=submit]');if(btn)btn.disabled=true;
   try{
     if(f.id==='cloud-auth-form'){
@@ -792,7 +909,7 @@ function bind(){
     }
     if(f.id==='cloud-create-form'){const code=await cloud.createFamily(String(new FormData(f).get('familyName')));openModal('Семья создана',`<p>Сохрани код для присоединения жены. Его можно показать только сейчас, но позже создать новый.</p><textarea class="cloud-invite-text" readonly>${esc(code)}</textarea><button class="btn" data-action="cloud-copy-invite" data-code="${esc(code)}">Скопировать код</button>`);render();return;}
     if(f.id==='cloud-join-form'){await cloud.joinFamily(String(new FormData(f).get('invite')));render();toast('Ты присоединился к семье. Теперь скачай её историю.');return;}
-    if(f.id==='tx-form')await submitTransaction(f);if(f.id==='ocr-expense-form')await submitOcrExpense(f);if(f.id==='budget-form')await submitBudget(f);if(f.id==='wallet-form')await submitWallet(f);if(f.id==='category-form')await submitCategory(f);if(f.id==='import-form')await doCSVImport(f);if(f.id==='deposit-form')await submitDeposit(f);if(f.id==='deposit-interest-form')await submitDepositInterest(f);}
+    if(f.id==='balances-form')await saveBalanceAdjustment(f);if(f.id==='home-settings-form')await saveHomeSettings(f);if(f.id==='recurring-form')await saveRecurring(f);if(f.id==='tx-form')await submitTransaction(f);if(f.id==='ocr-expense-form')await submitOcrExpense(f);if(f.id==='budget-form')await submitBudget(f);if(f.id==='wallet-form')await submitWallet(f);if(f.id==='category-form')await submitCategory(f);if(f.id==='import-form')await doCSVImport(f);if(f.id==='deposit-form')await submitDeposit(f);if(f.id==='deposit-interest-form')await submitDepositInterest(f);}
   catch(err){console.error(err);toast('Ошибка: '+err.message);}
   finally{if(btn&&btn.isConnected)btn.disabled=false;}
  });
@@ -836,7 +953,7 @@ function bind(){
   if(e.target.id==='category-search'){$('#category-list').innerHTML=categoryList(e.target.value);}
   if(e.target.id==='quick-category-search'){$('#quick-category-grid').innerHTML=quickCategoryItems(e.target.value);}
  });
- document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal(); if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-action=select-month]')){e.preventDefault();e.target.click();}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal(); if(e.target.closest('#tx-form')&&!e.target.closest('.tx-extra')&&(e.key===','||e.key==='.'||/^[0-9]$/.test(e.key)||e.key==='Backspace')){e.preventDefault();useKeypadKey(e.key==='Backspace'?'back':e.key==='.'?',':e.key);return;} if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-action=select-month]')){e.preventDefault();e.target.click();}});
   $('#open-filters').addEventListener('click',()=>{setPage('transactions');document.getElementById('tx-search')?.focus();});
 }
 async function start(){

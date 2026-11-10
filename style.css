@@ -204,3 +204,29 @@ html[data-theme=rose] .month-navigation .selected-month{background:#fff;color:#a
 .cloud-notice{margin:13px 0;font-size:14px;line-height:1.5;color:var(--text-muted,#97a8bb)}
 .cloud-error{padding:10px 12px;border-radius:10px;background:rgba(229,93,93,.12);color:#e77e78;margin-bottom:12px;font-size:13px}
 .cloud-timestamp{margin-top:8px;font-size:12px;opacity:.75}
+
+/* v12 — быстрый ввод доходов и расходов */
+.modal:has(.tx-keypad-panel){max-width:460px;padding:17px 20px 22px}
+.modal:has(.tx-keypad-panel) .modal-head{margin-bottom:5px}
+.modal:has(.tx-keypad-panel) .modal-head h2{font-size:17px}
+.tx-entry-heading{display:flex;align-items:center;justify-content:center;gap:9px;padding:5px 0 13px;font-size:15px;font-weight:750}
+.tx-entry-icon{width:35px;height:35px;display:grid;place-items:center;border-radius:50%;background:var(--tile-bg,#edf6f4);font-size:23px}
+.tx-entry-category{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-entry-types{margin-bottom:5px;max-width:330px;margin-inline:auto}
+.tx-keypad-panel{text-align:center;margin:0 auto}
+.tx-amount-caption{font-size:11px;color:var(--switch-muted,#879b99);margin:6px 0 3px}
+.tx-big-amount{font-size:clamp(39px,11vw,62px);font-weight:850;letter-spacing:-.06em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:4px 0 16px;line-height:1.2}
+.tx-keypad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-width:350px;margin:auto}
+.tx-key{height:51px;font-size:25px;font-weight:650;border:1px solid var(--category-border,#e0e9e5);background:var(--tile-bg,#f3f7f6);color:inherit;border-radius:19px;box-shadow:0 2px 7px #00000007;touch-action:manipulation}
+.tx-key:active{transform:scale(.96);background:#a5d8c5}
+.tx-key-back{font-size:23px}
+.tx-entry-date{margin:13px 0 7px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--switch-muted,#819692);font-size:12px}
+.tx-entry-date input[type=date]{width:154px;max-width:154px;min-height:32px;height:34px;padding:4px 8px;font-size:13px;border-radius:11px;background:var(--tile-bg,#f5f8f7);color:inherit}
+.tx-extra{border:1px solid var(--category-border,#e4eae7);border-radius:15px;margin-top:10px;padding:0 12px}
+.tx-extra summary{cursor:pointer;padding:11px 2px;font-weight:700;font-size:13px;list-style-position:inside}
+.tx-extra-content{display:grid;gap:12px;padding:5px 0 13px}
+.tx-extra .cashback-fields{padding:10px}
+.tx-extra .cashback-fields p{display:none}
+.tx-entry-actions{display:flex;gap:12px;margin-top:12px}
+.tx-entry-actions .btn.primary{flex:1;min-height:46px}
+@media(max-width:760px){.modal:has(.tx-keypad-panel){max-height:96vh;padding:14px 17px calc(16px + env(safe-area-inset-bottom))}.tx-big-amount{margin-bottom:12px}.tx-key{height:clamp(44px,6.6vh,55px)}.tx-extra-content{max-height:27vh;overflow-y:auto}}
