@@ -613,9 +613,17 @@ function exportCSV(){
  download('\uFEFF'+rows.map(r=>r.map(csvEscape).join(';')).join('\r\n'),`moy-koshelek-${today()}.csv`,'text/csv;charset=utf-8');
 }
 async function restoreJSONData(data){
- if(cloud.status().active){alert("Облачная синхронизация включена. Полная замена локальной базы сейчас запрещена во избежание рассогласования. Экспорт JSON и импорт отдельных CSV-операций доступны.");return;}
  const counts=validateBackup(data);
- if(!confirm(`В файле найдено ${counts.transactions.toLocaleString('ru-RU')} операций и ${counts.categories} категорий.\n\nПОЛНОСТЬЮ ЗАМЕНИТЬ текущую базу на данные из файла?\n\nЕсли у вас уже есть новые операции, сначала нажмите «Скачать полную копию JSON», затем повторите импорт.`))return;
+ if(cloud.status().active){
+  if(!confirm(`В файле ${counts.transactions.toLocaleString('ru-RU')} операций.\n\nДобавить отсутствующие записи в семейный бюджет, не удаляя уже существующие?\n\nПеред импортом рекомендуется сохранить JSON-копию.`))return;
+  const notice=$('#toast');if(notice){notice.textContent='Подготовка импорта… Не закрывай приложение.';notice.classList.add('visible');clearTimeout(toast.timer);}
+  const result=await cloud.mergeImportedBackup(data,(done,total)=>{const t=$('#toast');if(t){t.classList.add('visible');t.textContent=`Отправлено ${done.toLocaleString('ru-RU')} из ${total.toLocaleString('ru-RU')} записей. Не закрывай приложение.`;}});
+  await loadData();render();
+  if(result.error)alert(`Добавлено на устройство ${result.added} записей, но отправка завершилась с ошибкой: ${result.error}.\n\nДанные сохранены на этом устройстве и ожидают синхронизации. НЕ повторяй импорт и не удаляй данные приложения.`);
+  else toast(`Импорт: добавлено ${result.added} записей, пропущено существующих ${result.skipped+result.duplicates}.`);
+  return;
+ }
+ if(!confirm(`В файле найдено ${counts.transactions.toLocaleString('ru-RU')} операций и ${counts.categories} категорий.\n\nПОЛНОСТЬЮ ЗАМЕНИТЬ текущую базу на данные из файла?\n\nЕсли есть новые операции, сначала скачай резервную копию.`))return;
  await replaceDatabase(data);
  await loadData();render();
  toast(`База восстановлена: ${counts.transactions.toLocaleString('ru-RU')} операций.`);
@@ -633,7 +641,8 @@ async function importCategoryList(imported){
   unique.push({id,name:cleanName(c.name),type:c.type,color:/^#[0-9a-fA-F]{6}$/.test(c.color)?c.color:'#39a888'});
  }
  await insertMany('categories',unique);
- await loadData();render();toast(`Категорий добавлено: ${unique.length}. Операции сохранены.`);
+ const upload=await cloud.importAddedRecords({categories:unique});
+ await loadData();render();toast(`Категорий добавлено: ${unique.length}.${upload.error?' Отправка будет повторена.':''}`);
 }
 async function importDataFile(file){
  if(/\.csv$/i.test(file.name)){
@@ -688,9 +697,12 @@ async function doCSVImport(form){
  }
  try{
   await insertMany('wallets',newWallets);await insertMany('categories',newCategories);await insertMany('transactions',newTx);
+  let syncProblem='';
+  if(cloud.status().active){try{await cloud.sync();}catch(e){syncProblem=e.message;}}
   await loadData();closeModal();render();
   state.importRows=null;state.importHeaders=null;state.importMapping=null;
-  toast(`Добавлено ${newTx.length}, пропущено ошибок ${skipped}, переводов ${transfers}. Повторы не добавлены.`);
+  toast(`Добавлено ${newTx.length}, пропущено ошибок ${skipped}, переводов ${transfers}.${syncProblem?' Отправка ещё не завершена.':''}`);
+  if(syncProblem)alert('Импорт сохранён локально. Ошибка облачной отправки: '+syncProblem+'\nПовтори синхронизацию позже, НЕ импортируй файл повторно.');
   if(errors.length)alert('Примеры некорректных строк:\n'+errors.join('\n'));
  }catch(e){toast('Ошибка импорта: '+e.message);}
 }

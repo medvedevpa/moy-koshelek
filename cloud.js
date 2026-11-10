@@ -50,6 +50,62 @@ async function fetchAll(){const rows=[];let offset=0;while(true){const page=awai
 export async function cloudHasRecords(){return (await api(`/rest/v1/sync_records?select=record_id&family_id=eq.${family}&limit=1`)).length>0}
 export async function counts(){return Object.fromEntries(await Promise.all(kinds.map(async x=>[x,(await getAll(x)).length])))}
 async function push(batch){const result=await api('/rest/v1/rpc/apply_family_changes',{method:'POST',data:{fid:family,changes:batch.map(x=>({type:x.type,id:x.id,payload:x.deleted?null:x.payload,deleted:!!x.deleted,expected_rev:x.expected||0}))}});for(const x of result)await setRevision(x.type,x.id,Number(x.revision));return result}
+// Safely merge a bulk import into an already-linked family. Never overwrite a local or
+// remote item by ID; send the remaining items using a persistent outbox.
+// If the network drops the outbox stays on the device and normal sync retries it.
+export async function mergeImportedBackup(data,progress=()=>{}) {
+ if(!active||!session||!family)throw Error('Сначала включи синхронизацию');
+ if(busy)throw Error('Синхронизация выполняется. Повтори попытку немного позже.');
+ const remote=await fetchAll();
+ const remoteKeys=new Set(remote.map(x=>x.entity_type+'|'+x.record_id));
+ const existing=Object.fromEntries(await Promise.all(kinds.map(async t=>[t,new Set((await getAll(t)).map(x=>String(x.id)))])));
+ const remoteSources=new Set(remote.filter(x=>x.entity_type==='transactions'&&!x.deleted&&x.payload?.sourceKey).map(x=>x.payload.sourceKey));
+ const localSources=new Set((await getAll('transactions')).map(x=>x.sourceKey).filter(Boolean));
+ const batches={};let skipped=0, duplicates=0;
+ for(const type of kinds){
+  batches[type]=[];
+  for(const item of data[type]||[]){
+   const id=String(item.id);
+   if(existing[type].has(id)||remoteKeys.has(type+'|'+id)){skipped++;continue;}
+   if(type==='transactions'&&item.sourceKey&&(localSources.has(item.sourceKey)||remoteSources.has(item.sourceKey))){duplicates++;continue;}
+   batches[type].push(item);
+   existing[type].add(id);
+   if(type==='transactions'&&item.sourceKey)localSources.add(item.sourceKey);
+  }
+ }
+ const entries=kinds.flatMap(type=>batches[type].map(x=>({type,id:String(x.id),payload:x})));
+ if(!entries.length)return {added:0,skipped,duplicates,sent:0};
+ await stageChanges(entries);
+ suppressed=true;
+ try {for(const type of kinds)await insertMany(type,batches[type]);}
+ finally {suppressed=false;}
+ // Keep changes safely on the device even when transmission fails.
+ let sent=0, error='';
+ try{const result=await sync(progress);sent=result?.sent||0;}
+ catch(e){error=e.message;}
+ return {added:entries.length,skipped,duplicates,sent,error};
+}
+async function stageChanges(entries){
+ const db=await openDB();
+ for(let i=0;i<entries.length;i+=500){
+  const chunk=entries.slice(i,i+500);
+  await new Promise((resolve,reject)=>{
+   const transaction=db.transaction('cloud_pending','readwrite');
+   const store=transaction.objectStore('cloud_pending');
+   for(const x of chunk)store.put({key:recordKey(x.type,x.id),family,type:x.type,id:x.id,payload:x.payload,deleted:false,nonce:crypto.randomUUID()});
+   transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error);
+  });
+ }
+}
+export async function importAddedRecords(groups,progress=()=>{}){
+ if(!active)return {sent:0};
+ const entries=kinds.flatMap(type=>(groups[type]||[]).map(x=>({type,id:String(x.id),payload:x})));
+ if(!entries.length)return {sent:0};
+ await stageChanges(entries);
+ let sent=0,error='';
+ try{sent=(await sync(progress))?.sent||0;}catch(e){error=e.message;}
+ return {sent,error};
+}
 export async function initialUpload(progress=()=>{}){
  if(active)throw Error('Уже подключено');if(!family)throw Error('Выбери семью');
  const remote=await fetchAll();
@@ -61,13 +117,13 @@ export async function initialUpload(progress=()=>{}){
  busy=true;update();try{for(let i=0;i<items.length;i+=60){await push(items.slice(i,i+60));progress(Math.min(i+60,items.length),items.length)}for(const x of remote)await setRevision(x.entity_type,x.record_id,Number(x.revision));active=true;lastSyncAt=new Date().toISOString();persist();start();return {sent:items.length,existing:remote.length}}finally{busy=false;update()}
 }
 export async function initialDownload(){if(!family)throw Error('Выбери семью');const remote=await fetchAll();if(!remote.length)throw Error('Семейная база пока пустая');const data=Object.fromEntries(kinds.map(x=>[x,[]]));for(const x of remote)if(!x.deleted&&kinds.includes(x.entity_type)&&x.payload)data[x.entity_type].push(x.payload);busy=true;suppressed=true;update();try{await replaceDatabase(data);for(const x of remote)await setRevision(x.entity_type,x.record_id,Number(x.revision));active=true;lastSyncAt=new Date().toISOString();persist();start();return Object.fromEntries(kinds.map(x=>[x,data[x].length]))}finally{suppressed=false;busy=false;update()}}
-export async function sync(){
+export async function sync(progress=()=>{}){
  if(!active||!session||!family||busy||!navigator.onLine)return;
  busy=true;lastError='';update();try{
   const remote=await fetchAll();const edits=await queued();const dirty=new Set(edits.map(x=>x.type+'|'+x.id));
   const added=Object.fromEntries(kinds.map(x=>[x,[]]));suppressed=true;
   try{for(const x of remote){if(!kinds.includes(x.entity_type)||dirty.has(x.entity_type+'|'+x.record_id))continue;const old=await revision(x.entity_type,x.record_id);if(Number(x.revision)<=old)continue;if(x.deleted)await remove(x.entity_type,x.record_id);else added[x.entity_type].push(x.payload);await setRevision(x.entity_type,x.record_id,Number(x.revision))}for(const name of kinds)if(added[name].length)await insertMany(name,added[name])}finally{suppressed=false}
-  for(let i=0;i<edits.length;i+=60){const batch=edits.slice(i,i+60);for(const x of batch)x.expected=await revision(x.type,x.id);await push(batch);for(const x of batch){const current=await getStore('cloud_pending',recordKey(x.type,x.id));if(current?.nonce===x.nonce)await putStore('cloud_pending',recordKey(x.type,x.id),null)}}
+  for(let i=0;i<edits.length;i+=60){const batch=edits.slice(i,i+60);for(const x of batch)x.expected=await revision(x.type,x.id);await push(batch);for(const x of batch){const current=await getStore('cloud_pending',recordKey(x.type,x.id));if(current?.nonce===x.nonce)await putStore('cloud_pending',recordKey(x.type,x.id),null)}progress(Math.min(i+60,edits.length),edits.length)}
   lastSyncAt=new Date().toISOString();window.dispatchEvent(new Event('cloud-changed'));return {sent:edits.length};
  }catch(e){lastError=e.message;throw e}finally{busy=false;update()}
 }
