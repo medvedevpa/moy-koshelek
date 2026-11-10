@@ -33,9 +33,9 @@ const PROFILE_LOOK={me:{name:'Мой кошелёк',sub:'Личный бюдж�
 let state = { wallets:[], categories:[], transactions:[], budgets:[], catUI:{type:'expense',view:'active',sort:'frequent',search:''}, page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
 
 function wallet() {
- const picked=state.wallets.find(w=>w.id===state.walletId);
+ const picked=state.wallets.find(w=>w.id===state.walletId&&w.status!=='closed');
  if(picked&&(state.profileId==='family'||ownerOfWallet(picked)===state.profileId))return picked;
- return state.wallets.find(w=>state.profileId!=='family'&&ownerOfWallet(w)===state.profileId&&w.currency==='RUB')||state.wallets.find(w=>w.currency==='RUB')||state.wallets[0];
+ return state.wallets.find(w=>w.status!=='closed'&&state.profileId!=='family'&&ownerOfWallet(w)===state.profileId&&w.currency==='RUB')||state.wallets.find(w=>w.status!=='closed'&&w.currency==='RUB')||state.wallets.find(w=>w.status!=='closed')||state.wallets[0];
 }
 function ownerOfWallet(w){return ['me','wife','matvey','family'].includes(w?.ownerId)?w.ownerId:'me';}
 function ownerOfTx(t){return ['me','wife','matvey','family'].includes(t?.ownerId)?t.ownerId:ownerOfWallet(state.wallets.find(w=>w.id===t.walletId));}
@@ -99,7 +99,7 @@ function categoryOptions(type, selected='', allowAll=false, onlyActive=false){
   const cats=state.categories.filter(c=>(type==='all'||c.type===type)&&(!onlyActive||!isCategoryHidden(c)||c.id===selected)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
   return (allowAll?opt('all','Все категории',selected==='all'):'')+cats.map(c=>opt(c.id,c.name,c.id===selected)).join('');
 }
-function walletOptions(selected='', filter=()=>true){return state.wallets.filter(filter).map(w=>opt(w.id,`${w.name} · ${w.currency}`,w.id===selected)).join('');}
+function walletOptions(selected='', filter=()=>true){return state.wallets.filter(w=>(w.status!=='closed'||w.id===selected)&&filter(w)).map(w=>opt(w.id,`${w.name}${w.status==='closed'?' (архив)':''} · ${w.currency}`,w.id===selected)).join('');}
 async function loadData(){
   const [wallets,categories,transactions,budgets]=await Promise.all(['wallets','categories','transactions','budgets'].map(getAll));
   Object.assign(state,{wallets,categories,transactions,budgets});
@@ -107,19 +107,12 @@ async function loadData(){
     const w={id:uid(),name:'Наличные',currency:'RUB',initialBalanceMinor:0};
     await save('wallets',w); state.wallets=[w];
   }
-  if(!state.wallets.some(w=>ownerOfWallet(w)==='wife')){
-    const spouse={id:uid(),name:'Карта жены',ownerId:'wife',currency:'RUB',initialBalanceMinor:0};
-    await save('wallets',spouse);state.wallets.push(spouse);
-  }
-  if(!state.wallets.some(w=>ownerOfWallet(w)==='matvey')){
-    const child={id:'wallet-matvey-default-v13',name:'Копилка Матвея',ownerId:'matvey',currency:'RUB',kind:'savings',initialBalanceMinor:0};
-    await save('wallets',child);state.wallets.push(child);
-  }
+  // V15: do not recreate family wallets after the user deletes or archives them.
   if(!categories.length){
     const seed=[{id:uid(),name:'Другое',type:'income',color:'#50b9a1'},{id:uid(),name:'Другое',type:'expense',color:'#e66b80'}];
     await insertMany('categories',seed);state.categories=seed;
   }
-  if (!state.wallets.some(w=>w.id===state.walletId)) state.walletId=state.wallets[0].id;
+  if (!state.wallets.some(w=>w.id===state.walletId&&w.status!=='closed')) state.walletId=state.wallets.find(w=>w.status!=='closed')?.id||state.wallets[0].id;
   // Legacy Spendee backup has no owner fields: all historic rows remain assigned to "Мой".
   if(!['me','wife','matvey','family'].includes(state.profileId))state.profileId='me';
   if(!['me','wife'].includes(state.deviceOwner))state.deviceOwner='me';
@@ -195,7 +188,7 @@ function themedBarChart(type='expense'){
  const months=Array.from({length:6},(_,i)=>moveMonth(anchor,i-5));
  const data=months.map(month=>({month,...monthlyTotals(w,month)}));
  const top=Math.max(1,...data.map(x=>x[type]));
- return `<div class="lux-chart" role="group" aria-label="Выбрать месяц">${data.map(d=>{
+ return `<div class="lux-chart ${type==='income'?'lux-income-chart':'lux-expense-chart'}" role="group" aria-label="${type==='income'?'Доходы':'Расходы'} по месяцам, выбрать месяц">${data.map(d=>{
  const height=d[type]===0?0:Math.max(7,Math.round(d[type]/top*100));const current=d.month===state.focusMonth;
  return `<button class="lux-chart-month ${current?'chosen':''}" data-action="select-month" data-month="${d.month}" title="${esc(monthTitle(d.month))}: ${esc(format(d[type],w.currency))}"><span class="lux-chart-value">${current?esc(format(d[type],w.currency)):''}</span><span class="lux-bar-shell"><span class="lux-bar" style="height:${height}%"></span></span><span class="lux-chart-label">${esc(new Date(d.month+'-01T12:00:00').toLocaleDateString('ru-RU',{month:'short'}).replace('.',''))}</span></button>`;}).join('')}</div>`;
 }
@@ -223,17 +216,19 @@ function renderDashboard(){
  <div class="lux-stats"><button class="lux-metric metric-in" data-action="show-transactions"><small>↘ Доходы</small><b>+${esc(format(income,w.currency))}</b></button><button class="lux-metric metric-out" data-action="show-transactions"><small>↗ Расходы</small><b>−${esc(format(expense,w.currency))}</b></button><button class="lux-metric metric-cash"><small>🎁 Кешбэк</small><b>+${esc(format(cash,w.currency))}</b></button></div>
  ${!knownBalance()?`<button class="lux-balance-hint" data-action="adjust-balances">Сверить с реальными счетами <span>›</span></button>`:''}</section>
  <section class="lux-panel lux-section"><div class="lux-section-head"><h2>${isKid?'Расходы Матвея':'Расходы по месяцам'}</h2><span class="lux-pill">${esc(monthTitle(month,true))}</span></div>${themedBarChart('expense')}<div class="lux-chart-footer"><button data-action="prev-month">‹ Раньше</button><button data-action="current-month">Текущий месяц</button><button data-action="next-month" ${month>=today().slice(0,7)?'disabled':''}>Позже ›</button></div></section>
+ <section class="lux-panel lux-section lux-income-section"><div class="lux-section-head"><h2>${isKid?'Поступления Матвея':'Доходы по месяцам'}</h2><span class="lux-pill lux-income-total">+${esc(format(income,w.currency))} за месяц</span></div>${themedBarChart('income')}<p class="lux-chart-note">${isKid?'Поступления, подарки и пополнение копилки':'Доходы по всем категориям за выбранные месяцы'}</p></section>
  ${isKid?`<section class="lux-panel lux-section"><div class="lux-section-head"><h2>Регулярные расходы</h2><button class="text-action" data-action="add-recurring">+ Добавить</button></div>${plannedRecurring.length?plannedRecurring.slice(0,4).map(b=>`<button class="lux-mini-row" data-action="pay-recurring" data-id="${esc(b.id)}"><span>🧸 ${esc(b.name)}</span><strong>${esc(format(b.limitMinor))} / мес.</strong></button>`).join(''):'<p class="muted small-text">Садик, кружки, занятия — можно настроить ежемесячные платежи.</p>'}</section>`:''}
  <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Последние операции</h2><button class="text-action" data-action="show-transactions">Все ›</button></div>${premiumTransactionRows(transactions,isKid?4:5)}<div class="lux-quick-actions"><button data-action="add-tx">＋ Записать операцию</button><button data-action="scan-expense">📷 Со скриншота</button></div></section>
  ${isFamily?`<section class="lux-panel lux-section"><div class="lux-section-head"><h2>Кошельки семьи</h2><button class="text-action" data-page="accounts">Счета ›</button></div><div class="lux-family-tiles">${['me','wife','matvey','family'].map(id=>`<button data-action="select-profile" data-id="${id}"><span>${PROFILE_LOOK[id].emoji}</span><b>${OWNERS[id]}</b><strong>${esc(format(state.wallets.filter(w=>ownerOfWallet(w)===id&&w.currency==='RUB'&&w.status!=='closed').reduce((sum,w)=>sum+balance(w),0)))}</strong></button>`).join('')}</div></section>`:
  `<section class="lux-panel lux-section"><div class="lux-section-head"><h2>${isKid?'Копилка и накопления':'Счета и накопления'}</h2><button class="text-action" data-page="accounts">Управлять ›</button></div><div class="lux-account-grid">${premiumAccountCards(3)}</div></section>`}
+ <section class="lux-panel lux-section lux-income-breakdown"><div class="lux-section-head"><h2>Доходы по категориям</h2><button class="text-action" data-page="overview">Подробно ›</button></div>${categoriesBar(state.transactions.filter(t=>t.date.startsWith(month)), 'income', w)}</section>
  ${houseRows.length||isFamily?`<button class="lux-house-preview lux-panel" data-page="house"><img src="./assets/our-house.webp" alt="Эскиз нашего дома" loading="lazy"><span><b>Наш дом</b><small>${houseRows.length} операций по проекту · ${esc(format(houseRows.reduce((sum,t)=>sum+netExpense(t),0)))}</small></span><span>›</span></button>`:''}
  </div>`;
 }
 function renderAccounts(){
- const accounts=profileWallets(),anyAnchored=accounts.some(w=>w.balanceAnchorAt),w=wallet();
+ const accounts=profileWallets(),archived=state.wallets.filter(x=>x.status==='closed'&&x.currency==='RUB'&&(state.profileId==='family'||ownerOfWallet(x)===state.profileId)),w=wallet();
  return `<div class="lux-dashboard"><section class="lux-hero lux-panel accounts-hero"><div class="lux-eyebrow">СЧЕТА И НАКОПЛЕНИЯ ✦</div><div class="lux-hero-title">${knownBalance()?'Текущий баланс':'Расчётный баланс'}</div><div class="lux-balance">${esc(format(portfolio(),w.currency))}</div><div class="lux-hero-symbol">✧</div><p class="lux-account-advice">${knownBalance()?'Остатки сверены с реальными счетами':'После импорта истории лучше указать реальные остатки'}</p></section>
- <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Мои счета</h2><button class="text-action" data-action="add-wallet">＋ Новый</button></div><div class="lux-account-list">${accounts.map(a=>`<div class="lux-account-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>${esc(OWNERS[ownerOfWallet(a)])}${a.kind==='deposit'?' · вклад '+Number(a.rate||0)+'%':''}${a.balanceAnchorAt?' · ✓ сверено':''}</small></span><strong>${esc(format(balance(a),a.currency))}</strong><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Изменить счёт">›</button></div>`).join('')}</div><button class="lux-main-button" data-action="adjust-balances">✓ Актуализировать остатки</button></section>
+ <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Мои счета</h2><button class="text-action" data-action="add-wallet">＋ Новый</button></div><div class="lux-account-list">${accounts.map(a=>`<div class="lux-account-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>${esc(OWNERS[ownerOfWallet(a)])}${a.kind==='deposit'?' · вклад '+Number(a.rate||0)+'%':''}${a.balanceAnchorAt?' · ✓ сверено':''}</small></span><strong>${esc(format(balance(a),a.currency))}</strong><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Изменить счёт">›</button></div>`).join('')}</div>${archived.length?`<details class="lux-archived-accounts"><summary>Архивные счета (${archived.length})</summary><p class="small-text muted">Операции остаются в истории. Архивные счета не входят в текущий баланс.</p>${archived.map(a=>`<div class="lux-account-line lux-archived-line"><span class="lux-account-symbol">${accountVisual(a)}</span><span><b>${esc(a.name)}</b><small>Архив · ${esc(OWNERS[ownerOfWallet(a)])}</small></span><button data-action="edit-wallet" data-id="${esc(a.id)}" aria-label="Управлять архивным счётом">Вернуть ›</button></div>`).join('')}</details>`:''}<button class="lux-main-button" data-action="adjust-balances">✓ Актуализировать остатки</button></section>
  <section class="lux-panel lux-section"><div class="lux-section-head"><h2>Вклады и накопления</h2><button class="text-action" data-action="add-deposit">+ Добавить</button></div>${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').length?`<div class="lux-account-grid">${accounts.filter(a=>a.kind==='deposit'||a.kind==='savings').map(a=>`<button class="lux-account-tile" data-action="edit-wallet" data-id="${esc(a.id)}"><span class="lux-account-symbol">${accountVisual(a)}</span><span class="lux-account-name">${esc(a.name)}</span><strong>${esc(format(balance(a),a.currency))}</strong>${a.rate?`<small>${Number(a.rate)}% годовых</small>`:''}</button>`).join('')}</div>`:'<div class="premium-empty">Добавьте вклад или накопительный счёт</div>'}<div class="lux-quick-actions"><button data-action="add-interest">＋ Проценты по вкладу</button><button data-action="download-deposit-template">⇩ Шаблон CSV</button></div><details class="lux-extra-tools"><summary>Импорт вкладов и параметры</summary><label class="field">Загрузить список вкладов (CSV)<input type="file" id="deposit-csv-file" accept=".csv,text/csv"></label><p class="muted small-text">Вклад — это актив, а не доход. Процентные начисления учитываются отдельно.</p></details></section></div>`;
 }
 function renderHomeProject(){
@@ -612,6 +607,7 @@ function openBudget(id){
 }
 function openWallet(id){
  const w=state.wallets.find(x=>x.id===id);
+ const hasHistory=Boolean(w&&(state.transactions.some(t=>t.walletId===w.id||t.toWalletId===w.id)||state.budgets.some(b=>b.walletId===w.id)));
  openModal(w?'Редактировать кошелёк':'Новый кошелёк',`<form id="wallet-form" data-id="${esc(id||'')}" class="form-grid">
  ${field('Название',`<input name="name" value="${esc(w?.name||'')}" required>`,true)}
  ${field('Валюта',`<select name="currency" ${w?'disabled':''}>${['RUB','EUR','USD','GBP','KZT','BYN','UAH'].map(v=>opt(v,v,v===(w?.currency||'RUB'))).join('')}</select>`)}
@@ -619,7 +615,32 @@ function openWallet(id){
  ${field('Начальный баланс',`<input name="initial" type="number" step="0.01" value="${w?esc((w.initialBalanceMinor||0)/100):'0'}" required>`)}
  ${w?.kind==='deposit'?`${field('Банк',`<input name="bank" maxlength="80" value="${esc(w.bank||'')}" required>`)}${field('Ставка годовых, %',`<input name="rate" type="number" min="0" max="100" step="0.01" value="${esc(w.rate||0)}">`)}${field('Дата окончания',`<input name="maturityDate" type="date" value="${esc(w.maturityDate||'')}">`)}${field('Состояние',`<select name="status">${opt('open','Действует',w.status!=='closed')}${opt('closed','Архивный / закрыт',w.status==='closed')}</select>`)}`:''}
  <p class="tiny muted wide">Начальный баланс — сумма до первой внесённой операции. После импорта истории обычно равен 0, если данные полные.</p>
- <div class="modal-actions wide"><button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div></form>`);
+ <div class="modal-actions wide"><button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div>
+ ${w?`<div class="wallet-manage-actions wide">${w.status==='closed'?`<button type="button" class="btn" data-action="restore-wallet" data-id="${esc(w.id)}">↺ Восстановить из архива</button>`:''}${w.status==='closed'&&hasHistory?'':`<button type="button" class="btn danger" data-action="delete-wallet" data-id="${esc(w.id)}">${w.status==='closed'?'Удалить окончательно':hasHistory?'В архив':'Удалить счёт'}</button>`}</div>`:''}</form>`);
+}
+// Deletion is safe only for a wallet without linked history and budget references.
+// If it is referenced by transactions, preserve it in the archive instead.
+async function deleteWalletSafely(id){
+ const w=state.wallets.find(x=>x.id===id);if(!w)return;
+ const linkedTransactions=state.transactions.filter(t=>t.walletId===id||t.toWalletId===id);
+ const linkedBudgets=state.budgets.filter(b=>b.walletId===id);
+ const links=linkedTransactions.length+linkedBudgets.length;
+ const active=state.wallets.filter(x=>x.status!=='closed');
+ if(w.status!=='closed'&&active.length<=1){toast('Нельзя убрать единственный активный счёт. Сначала создай другой.');return;}
+ if(links){
+  if(w.status==='closed'){toast('Счёт содержит историю. Для безопасности его можно хранить только в архиве.');return;}
+  const message=`У счёта «${w.name}» есть ${linkedTransactions.length} операций и ${linkedBudgets.length} связанных бюджетов.\n\nПереместить в архив? Старые операции и статистика останутся, но счёт исчезнет из активного списка и текущего баланса.`;
+  if(!confirm(message))return;
+  await save('wallets',{...w,status:'closed',archivedAt:new Date().toISOString()});
+  await loadData();state.walletId=null;closeModal();render();toast('Счёт перемещён в архив. История сохранена.');return;
+ }
+ if(!confirm(`Удалить счёт «${w.name}» без возможности отмены? История не связана с этим счётом.`))return;
+ await remove('wallets',id);await loadData();state.walletId=null;closeModal();render();toast('Лишний счёт удалён.');
+}
+async function restoreWallet(id){
+ const w=state.wallets.find(x=>x.id===id&&x.status==='closed');if(!w)return;
+ await save('wallets',{...w,status:'open',archivedAt:null});
+ await loadData();state.walletId=id;closeModal();render();toast('Счёт восстановлен.');
 }
 // Вклад является счётом. Перенос тела вклада — перевод, не доход.
 function openDeposit(){
@@ -648,7 +669,7 @@ async function submitDeposit(form){
  await save('wallets',item);await loadData();state.walletId=item.id;closeModal();render();toast('Вклад добавлен. Проценты можно записать отдельным доходом.');
 }
 function openDepositInterest(){
- const deposits=state.wallets.filter(w=>w.kind==='deposit'&&(state.profileId==='family'||ownerOfWallet(w)===state.profileId));
+ const deposits=state.wallets.filter(w=>w.kind==='deposit'&&w.status!=='closed'&&(state.profileId==='family'||ownerOfWallet(w)===state.profileId));
  if(!deposits.length)return toast('Сначала добавьте вклад во вкладке «Счета».');
  openModal('Начисление процентов',`<form id="deposit-interest-form" class="form-grid">
  ${field('Вклад',`<select name="deposit">${deposits.map(w=>opt(w.id,`${w.bank} · ${w.name}`,false)).join('')}</select>`,true)}
@@ -932,6 +953,8 @@ function bind(){
    if(a==='delete-budget') {if(confirm('Удалить бюджет?')){await remove('budgets',id);await loadData();render();}return;}
    if(a==='add-wallet'){openWallet();return;}
    if(a==='edit-wallet'){openWallet(id);return;}
+   if(a==='delete-wallet'){await deleteWalletSafely(id);return;}
+   if(a==='restore-wallet'){await restoreWallet(id);return;}
    if(a==='choose-wallet'){state.walletId=id;render();return;}
    if(a==='open-categories'){setPage('categories');return;}
    if(a==='back-to-settings'){setPage('settings');return;}
