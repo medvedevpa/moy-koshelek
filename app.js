@@ -28,8 +28,9 @@ const DEVICE_KEY='moy-koshelek-device-owner-v8';
 const devicePref=()=>{try{return localStorage.getItem(DEVICE_KEY)||'me';}catch{return 'me';}};
 const saveLocal=(key,value)=>{try{localStorage.setItem(key,value);}catch{}};
 const OWNERS={me:'Мой',wife:'Жены',matvey:'Матвей',family:'Семья'};
+const PROFILE_IMAGES={me:'./assets/logo-man.webp',wife:'./assets/logo-light.webp',matvey:'./assets/logo-light.webp',family:'./assets/logo-family.webp'};
 const PROFILE_LOOK={me:{name:'Мой кошелёк',sub:'Личный бюджет',emoji:'🌙',theme:'night'},wife:{name:'Кошелёк жены',sub:'Личный бюджет',emoji:'🌸',theme:'rose'},matvey:{name:'Кошелёк Матвея',sub:'Накопления и расходы',emoji:'🧸',theme:'aqua'},family:{name:'Семейный бюджет',sub:'Общий кошелёк',emoji:'💚',theme:'mint'}};
-let state = { wallets:[], categories:[], transactions:[], budgets:[], page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
+let state = { wallets:[], categories:[], transactions:[], budgets:[], catUI:{type:'expense',view:'active',sort:'frequent',search:''}, page:'dashboard', walletId:null, profileId:profilePref(), deviceOwner:devicePref(), period:'month', focusMonth:today().slice(0,7), txFilters:{search:'',category:'all',kind:'all',from:'',to:'',min:'',max:''}, maxTx:100, importRows:null, importHeaders:null, importMapping:null };
 
 function wallet() {
  const picked=state.wallets.find(w=>w.id===state.walletId);
@@ -47,7 +48,7 @@ function displayDelta(t,w){
  return 0; // Переводы не являются семейным доходом или расходом.
 }
 function ownerOptions(selected='me',family=false){return ['me','wife','matvey',...(family?['family']:[])].map(id=>opt(id,OWNERS[id],selected===id)).join('');}
-function profileBar(){return `<div class="profile-bar premium-switch" role="group" aria-label="Выбрать бюджет">${['me','wife','matvey','family'].map(id=>`<button class="profile-option ${state.profileId===id?'current':''}" data-action="select-profile" data-id="${id}" aria-pressed="${state.profileId===id}"><span class="profile-emoji">${PROFILE_LOOK[id].emoji}</span><span>${OWNERS[id]}</span></button>`).join('')}</div>`;}
+function profileBar(){return `<div class="profile-bar premium-switch" role="group" aria-label="Выбрать бюджет">${['me','wife','matvey','family'].map(id=>`<button class="profile-option ${state.profileId===id?'current':''}" data-action="select-profile" data-id="${id}" aria-pressed="${state.profileId===id}"><img class="profile-avatar" src="${PROFILE_IMAGES[id]}" alt=""><span>${OWNERS[id]}</span></button>`).join('')}</div>`;}
 function applyTheme(){
  const theme=PROFILE_LOOK[state.profileId]?.theme||'night';
  document.documentElement.dataset.theme=theme;
@@ -55,7 +56,8 @@ function applyTheme(){
  const profile=PROFILE_LOOK[state.profileId]||PROFILE_LOOK.me;
  const title=document.querySelector('#brand-profile-title');if(title)title.textContent=state.page==='house'?'Наш дом':profile.name;
  const subtitle=document.querySelector('#brand-profile-sub');if(subtitle)subtitle.textContent=state.page==='house'?'Наш семейный проект':profile.sub;
- const img=document.querySelector('#brand-mascot');if(img)img.src=state.profileId==='me'?'./assets/logo-night.webp':'./assets/logo-light.webp';
+ const img=document.querySelector('#brand-mascot');if(img)img.src=PROFILE_IMAGES[state.profileId];
+ const aside=document.querySelector('.aside-brand');if(aside)aside.src=PROFILE_IMAGES[state.profileId];
 }
 function cat(id) { return state.categories.find(c=>c.id===id); }
 function walletName(id) { return state.wallets.find(w=>w.id===id)?.name || 'Кошелёк'; }
@@ -92,8 +94,9 @@ function filteredByPeriod(w) { const start=datePeriod(); const end=state.period=
 function sumType(rows,type,w) { return rows.filter(t=>t.type===type && visibleTx(t,w)).reduce((s,t)=>s+(type==='expense'?netExpense(t):t.amountMinor),0); }
 function sortTx(a,b){ return b.date.localeCompare(a.date) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')); }
 const opt=(value,label,selected)=>`<option value="${esc(value)}" ${selected?'selected':''}>${esc(label)}</option>`;
-function categoryOptions(type, selected='', allowAll=false){
-  const cats=state.categories.filter(c=>type==='all'||c.type===type).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+function isCategoryHidden(c, profileId=state.profileId){return Array.isArray(c.hiddenProfiles)&&c.hiddenProfiles.includes(profileId);}
+function categoryOptions(type, selected='', allowAll=false, onlyActive=false){
+  const cats=state.categories.filter(c=>(type==='all'||c.type===type)&&(!onlyActive||!isCategoryHidden(c)||c.id===selected)).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
   return (allowAll?opt('all','Все категории',selected==='all'):'')+cats.map(c=>opt(c.id,c.name,c.id===selected)).join('');
 }
 function walletOptions(selected='', filter=()=>true){return state.wallets.filter(filter).map(w=>opt(w.id,`${w.name} · ${w.currency}`,w.id===selected)).join('');}
@@ -123,14 +126,15 @@ async function loadData(){
 }
 function toast(message){const t=$('#toast');t.textContent=message;t.classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('visible'),3500);}
 function render(){
-  const titles={dashboard:'Главная',accounts:'Счета',overview:'Обзор',house:'Наш дом',transactions:'История',budgets:'Бюджеты',settings:'Больше'};
+  const titles={dashboard:'Главная',accounts:'Счета',overview:'Обзор',house:'Наш дом',transactions:'История',budgets:'Бюджеты',settings:'Больше',categories:'Категории'};
   $('#page-title').textContent=titles[state.page]||'Мой кошелёк';
+  const fab=$('#floating-add');if(fab)fab.classList.toggle('hidden',state.page==='categories');
   applyTheme();
   $('#profile-switch').innerHTML=profileBar();
   $('#wallet-picker').innerHTML=walletOptions(wallet()?.id);
   $('#global-search').value=state.txFilters.search;
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===state.page||(state.page==='transactions'&&b.dataset.page==='dashboard')));
-  const pages={dashboard:renderDashboard,accounts:renderAccounts,overview:renderOverview,house:renderHomeProject,transactions:renderTransactions,budgets:renderBudgets,settings:renderSettings};
+  const pages={dashboard:renderDashboard,accounts:renderAccounts,overview:renderOverview,house:renderHomeProject,transactions:renderTransactions,budgets:renderBudgets,settings:renderSettings,categories:renderCategories};
   $('#content').innerHTML=pages[state.page]();
 }
 function monthlyTotals(w,month){
@@ -343,14 +347,45 @@ function renderSettings(){
  <label class="field">Чей это телефон по умолчанию?<select id="device-owner">${ownerOptions(state.deviceOwner)}</select></label>
  <button class="btn" data-action="switch-device-profile">Показать свой бюджет</button></section>
  <section class="panel"><div class="panel-header"><h2>Данные и устройство</h2></div><button class="btn" data-action="go-accounts">Перейти к счетам</button><button class="btn" data-action="show-budgets">Лимиты расходов</button><button class="btn" data-page="house">Наш дом</button><div class="settings-stat">${state.transactions.length.toLocaleString('ru-RU')} операций · ${state.wallets.length} счетов</div></section>
- <section class="panel"><div class="panel-header"><h2>Категории</h2><button class="btn small" data-action="add-category">+ Категория</button></div><p class="tiny muted">${income} доходных · ${expense} расходных</p>
- <input id="category-search" type="search" placeholder="Поиск категории" aria-label="Поиск категории" style="width:100%;margin-bottom:12px"/><div class="category-list" id="category-list">${categoryList('')}</div></section>
+ <section class="panel lux-category-entry"><div class="panel-header"><h2>Категории и иконки</h2><button class="btn small primary" data-action="open-categories">Управлять ›</button></div><p class="tiny muted">${income} доходных · ${expense} расходных. Скрывай устаревшие категории без изменения истории и баланса.</p></section>
  <section class="panel"><div class="panel-header"><h2>Резервная копия</h2></div><div class="setting-block"><button class="btn primary" data-action="backup-json">Скачать полную копию JSON</button><button class="btn" data-action="export-csv">Экспорт операций CSV</button></div></section>
  </div>`;
 }
-function categoryList(query){
-  const items=state.categories.filter(c=>c.name.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
-  return items.slice(0,200).map(c=>`<div class="list-row"><div class="row-left"><span class="cat-dot" style="background:${esc(c.color)}22;color:${esc(c.color)}">●</span><div><div class="row-title">${esc(c.name)}</div><div class="row-sub">${c.type==='income'?'Доход':'Расход'}</div></div></div><button class="btn small" data-action="edit-category" data-id="${esc(c.id)}">✎</button></div>`).join('')||'<div class="empty">Ничего не найдено</div>';
+const CATEGORY_ICON_GROUPS={
+ 'Доходы':['💰','💵','💳','👤','🧑‍💼','💼','🏦','📈','🎁','⭐','🪙','📦'],
+ 'Покупки':['🛒','🛍️','🍎','🥗','🍽️','☕','👟','👕','🧴','🧸','💊','🎮'],
+ 'Дом и семья':['🏡','🏠','🧱','🔨','🛠️','🪑','💡','⚡','💧','👨‍👩‍👦','👶','🎒'],
+ 'Жизнь':['🚗','🚙','⛽','🚕','🚆','✈️','🏝️','💗','🐾','🎂','🎓','🏥','📱'],
+ 'Другое':['📃','🧾','📚','🎬','🎉','🎧','🏋️','📌','📊','🗝️','💎','🪴','❓']
+};
+const CATEGORY_ICONS=new Set(Object.values(CATEGORY_ICON_GROUPS).flat());
+const safeCategoryColor=c=>/^#[0-9a-f]{6}$/i.test(c?.color||'')?c.color:'#c59e79';
+function categoryUsage(){const counts=new Map();for(const t of state.transactions)if(t.categoryId)counts.set(t.categoryId,(counts.get(t.categoryId)||0)+1);return counts;}
+function categoryManagerItems(){
+ const {type,view,sort,search}=state.catUI,counts=categoryUsage(),q=search.trim().toLocaleLowerCase('ru');
+ const filtered=state.categories.filter(c=>c.type===type&&c.name.toLocaleLowerCase('ru').includes(q)&&(view==='all'||(view==='hidden'?isCategoryHidden(c):!isCategoryHidden(c))))
+   .sort((a,b)=>sort==='alpha'?a.name.localeCompare(b.name,'ru'):(counts.get(b.id)||0)-(counts.get(a.id)||0)||a.name.localeCompare(b.name,'ru'));
+ if(!filtered.length)return '<div class="cat-manage-empty">Ничего не найдено. Попробуй другой фильтр.</div>';
+ return filtered.map(c=>{const hidden=isCategoryHidden(c),n=counts.get(c.id)||0,color=safeCategoryColor(c);
+   return `<article class="cat-manage-row" data-category-id="${esc(c.id)}">
+     <span class="cat-manage-icon" style="--category-color:${color}" aria-hidden="true">${esc(iconForCategory(c))}</span>
+     <div class="cat-manage-name"><strong>${esc(c.name)}</strong><small>${n.toLocaleString('ru-RU')} операций за всё время</small></div>
+     <button type="button" class="cat-manage-edit" data-action="edit-category" data-id="${esc(c.id)}" aria-label="Редактировать ${esc(c.name)}">✎</button>
+     <button type="button" class="cat-switch ${hidden?'is-off':'is-on'}" data-action="toggle-category" data-id="${esc(c.id)}" aria-pressed="${!hidden}" aria-label="${hidden?'Показывать':'Скрыть'} при добавлении: ${esc(c.name)}"><span class="cat-switch-track"><span></span></span><span class="cat-switch-label">${hidden?'Скрыта':'Активна'}</span></button>
+   </article>`;}).join('');
+}
+function renderCategories(){
+ const ui=state.catUI,active=state.categories.filter(c=>c.type===ui.type&&!isCategoryHidden(c)).length,hidden=state.categories.filter(c=>c.type===ui.type&&isCategoryHidden(c)).length;
+ return `<div class="category-manager">
+ <header class="cat-manage-header"><button class="cat-manage-back" data-action="back-to-settings">‹ Больше</button><button class="btn primary" data-action="add-category">＋ Новая</button></header>
+ <div class="cat-manage-hero"><div><span class="cat-manage-eyebrow">МОИ КАТЕГОРИИ</span><h2>Категории</h2><p>Иконки, порядок и видимость при добавлении операций</p></div><span class="cat-manage-hero-icon" aria-hidden="true">✦</span></div>
+ <div class="cat-manage-type" role="group" aria-label="Тип категорий"><button class="${ui.type==='expense'?'active':''}" data-action="category-type" data-type="expense">↗ Расходы</button><button class="${ui.type==='income'?'active':''}" data-action="category-type" data-type="income">↘ Доходы</button></div>
+ <label class="cat-manage-search"><span aria-hidden="true">⌕</span><input id="category-manager-search" type="search" placeholder="Найти категорию…" value="${esc(ui.search)}" autocomplete="off" aria-label="Поиск категории"></label>
+ <div class="cat-manage-tools"><div class="cat-manage-views" role="group" aria-label="Видимость категорий">${[['active','Активные'],['hidden','Скрытые'],['all','Все']].map(([v,label])=>`<button data-action="category-view" data-view="${v}" class="${ui.view===v?'active':''}">${label}</button>`).join('')}</div><label class="cat-manage-sort">Сортировка<select id="category-manager-sort">${opt('frequent','По частоте',ui.sort==='frequent')}${opt('alpha','По алфавиту',ui.sort==='alpha')}</select></label></div>
+ <div class="cat-manage-summary"><b>${active}</b> активных · <b>${hidden}</b> скрытых <span>· ${esc(OWNERS[state.profileId])}</span></div>
+ <section id="categories-results" class="cat-manage-results" aria-label="Список категорий">${categoryManagerItems()}</section>
+ <p class="cat-manage-note">Скрытые категории остаются в истории, аналитике и резервных копиях. Видимость настраивается отдельно для каждого профиля и синхронизируется между устройствами.</p>
+ </div>`;
 }
 function setPage(page){state.page=page;state.maxTx=100;render();window.scrollTo(0,0);}
 function openModal(title,body){$('#modal-root').innerHTML=`<div class="modal-backdrop" data-action="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><h2>${esc(title)}</h2><button class="close" data-action="close-modal" aria-label="Закрыть">×</button></div>${body}</div></div>`;}
@@ -441,7 +476,7 @@ function openTransaction(id,preferredType='expense',presetCategory=''){
  <label class="field ${editingType==='income'?'hidden':''}" id="tx-wallet-wrap">Оплачено с карты / счёта<select name="wallet">${walletOptions(w.id)}</select></label>
  <label class="field" id="tx-owner-wrap">${editingType==='income'?'Чей доход':'Чей расход'}<select name="owner">${ownerOptions(t?ownerOfTx(t):(state.profileId==='family'?state.deviceOwner:state.profileId),true)}</select></label>
  <div id="tx-cashback-container" class="${editingType==='expense'?'':'hidden'}">${cashbackFields(t)}</div>
- <div id="tx-category-wrap">${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions(editingType,t?.categoryId||presetCategory)}</select>`)}</div>
+ <div id="tx-category-wrap">${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions(editingType,t?.categoryId||presetCategory,false,true)}</select>`)}</div>
  <div class="field ${editingType==='transfer'?'':'hidden'}" id="tx-destination">${field('В какой кошелёк',`<select name="toWallet"><option value="">Выберите</option>${walletOptions(t?.toWalletId||'', x=>x.id!==w.id&&x.currency===w.currency)}</select>`)}</div>
  ${field('Заметка',`<input name="note" maxlength="500" value="${esc(t?.note||pendingRecurring?.name||'')}" placeholder="Необязательно">`)}
  <div id="tx-house-wrap" class="tx-house-field ${editingType==='expense'?'':'hidden'}"><label class="house-check"><input type="checkbox" name="houseProject" ${homeDefault?'checked':''}><span>🏡 Отнести к проекту «Наш дом»</span></label><label class="field">Раздел расходов<select name="houseSection">${[['other','Прочее'],['materials','Материалы'],['work','Работы'],['mortgage','Ипотека'],['utilities','Содержание']].map(([v,l])=>opt(v,l,t?.houseSection===v)).join('')}</select></label></div>
@@ -457,12 +492,13 @@ function updateTransactionType(preserveCategory=false){
  wrap.classList.toggle('hidden',editingType==='transfer');dest?.classList.toggle('hidden',editingType!=='transfer');
  w?.classList.toggle('hidden',editingType==='income');cb?.classList.toggle('hidden',editingType!=='expense');document.querySelector('#tx-house-wrap')?.classList.toggle('hidden',editingType!=='expense');
  const ownerLabel=$('#tx-owner-wrap');if(ownerLabel)ownerLabel.firstChild.textContent=editingType==='income'?'Чей доход':'Чей расход';
- const catInput=wrap.querySelector('select');if(catInput){const selected=preserveCategory?catInput.value:'';catInput.innerHTML='<option value="">Без категории</option>'+categoryOptions(editingType,selected);}
+ const catInput=wrap.querySelector('select');if(catInput){const selected=preserveCategory?catInput.value:'';catInput.innerHTML='<option value="">Без категории</option>'+categoryOptions(editingType,selected,false,true);}
 }
 
 let quickType='income';
 const iconForCategory=c=>{
  const n=c.name.toLocaleLowerCase('ru');
+ if(CATEGORY_ICONS.has(c.icon))return c.icon;
  if(/^(2?вк|работ|клиент|заказчик|покупател|зарплат|фриланс|услуг)/.test(n))return '👤';
  if(/процент|вклад|инвест|дивиден|пассив/.test(n))return '💰';
  if(/продукт|еда|магазин|пятёр|перекр|супермар|овощ/.test(n))return '🛒';
@@ -480,7 +516,7 @@ function quickCategoryItems(query=''){
  const counts=new Map();
  for(const t of state.transactions){if(t.type===quickType&&t.categoryId)counts.set(t.categoryId,(counts.get(t.categoryId)||0)+1);}
  const q=String(query).trim().toLocaleLowerCase('ru');
- const list=state.categories.filter(c=>c.type===quickType&&c.name.toLocaleLowerCase('ru').includes(q))
+ const list=state.categories.filter(c=>c.type===quickType&&!isCategoryHidden(c)&&c.name.toLocaleLowerCase('ru').includes(q))
    .sort((a,b)=>(counts.get(b.id)||0)-(counts.get(a.id)||0)||a.name.localeCompare(b.name,'ru'));
  return list.map(c=>`<button class="quick-cat" type="button" data-action="choose-quick-category" data-id="${esc(c.id)}" title="${esc(c.name)} · ${(counts.get(c.id)||0)} операций">
    <span class="quick-cat-icon" style="--cat-color:${/^#[0-9a-fA-F]{6}$/.test(c.color)?c.color:'#6e9fc9'}">${iconForCategory(c)}</span>
@@ -524,7 +560,7 @@ function openScreenshotExpense(){
  ${field('Дата',`<input required name="date" type="date" value="${today()}">`)}
  ${field('Оплачено с карты / счёта',`<select name="wallet">${walletOptions(w.id)}</select>`)}
  ${field('Чей расход',`<select name="owner">${ownerOptions(state.profileId==='family'?state.deviceOwner:state.profileId,true)}</select>`)}
- ${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions('expense')}</select>`)}
+ ${field('Категория',`<select name="category"><option value="">Без категории</option>${categoryOptions('expense','',false,true)}</select>`)}
  ${field('Магазин / заметка',`<input name="note" maxlength="500" placeholder="Например, продукты"/>`,true)}
  </div>
  <details class="ocr-details"><summary>Посмотреть распознанный текст</summary><pre id="ocr-raw"></pre></details>
@@ -665,11 +701,15 @@ async function importDepositsCSV(file){
  await insertMany('wallets',toAdd);await loadData();render();toast(`Добавлено вкладов: ${toAdd.length}.`);
 }
 function openCategory(id){
- const c=state.categories.find(x=>x.id===id);
- openModal(c?'Редактировать категорию':'Новая категория',`<form id="category-form" data-id="${esc(id||'')}" class="form-grid">
- ${field('Название',`<input name="name" value="${esc(c?.name||'')}" required>`,true)}
- ${field('Тип',`<select name="type" ${c?'disabled':''}>${opt('income','Доход',c?.type==='income')}${opt('expense','Расход',c?.type==='expense'||!c)}</select>`)}
- ${field('Цвет',`<input type="color" name="color" value="${esc(c?.color||'#36a584')}">`)}
+ const c=state.categories.find(x=>x.id===id),selectedIcon=CATEGORY_ICONS.has(c?.icon)?c.icon:iconForCategory(c||{name:'',type:state.catUI.type});
+ openModal(c?'Редактировать категорию':'Новая категория',`<form id="category-form" data-id="${esc(id||'')}" class="form-grid cat-editor">
+ ${field('Название',`<input name="name" value="${esc(c?.name||'')}" required maxlength="160" placeholder="Например, Продукты">`,true)}
+ ${field('Тип',`<select name="type" ${c?'disabled':''}>${opt('income','Доход',c?.type==='income'||(!c&&state.catUI.type==='income'))}${opt('expense','Расход',c?.type==='expense'||(!c&&state.catUI.type==='expense'))}</select>`)}
+ ${field('Цвет категории',`<input type="color" name="color" value="${safeCategoryColor(c)}">`)}
+ <div class="cat-icon-select wide"><div class="cat-icon-select-head"><span>Иконка категории</span><span class="cat-editor-preview" id="cat-editor-preview">${esc(selectedIcon)}</span></div>
+ <input type="hidden" name="icon" value="${esc(selectedIcon)}">
+ ${Object.entries(CATEGORY_ICON_GROUPS).map(([name,icons])=>`<div class="cat-icon-group"><b>${esc(name)}</b><div class="cat-icon-grid">${icons.map(icon=>`<button type="button" class="cat-icon-pick ${icon===selectedIcon?'chosen':''}" data-action="choose-category-icon" data-icon="${esc(icon)}" aria-label="Иконка ${esc(icon)}" aria-pressed="${icon===selectedIcon}">${esc(icon)}</button>`).join('')}</div></div>`).join('')}</div>
+ <p class="cat-editor-note wide">Смена названия, цвета или иконки не меняет суммы старых операций.</p>
  <div class="modal-actions wide"><button type="button" class="btn" data-action="close-modal">Отмена</button><button class="btn primary" type="submit">Сохранить</button></div></form>`);
 }
 async function submitTransaction(form){
@@ -703,7 +743,9 @@ async function submitWallet(form){
 }
 async function submitCategory(form){
  const f=new FormData(form),old=state.categories.find(c=>c.id===form.dataset.id);
- const c={id:old?.id||uid(),name:cleanName(f.get('name')),type:old?.type||f.get('type'),color:f.get('color')};
+ const icon=String(f.get('icon')||'');
+ const c={...old,id:old?.id||uid(),name:cleanName(f.get('name')),type:old?.type||f.get('type'),color:String(f.get('color')||'#c59e79'),icon:CATEGORY_ICONS.has(icon)?icon:'🧾',hiddenProfiles:Array.isArray(old?.hiddenProfiles)?old.hiddenProfiles:[]};
+ if(!c.name)return toast('Укажите название категории.');
  if(state.categories.some(x=>x.id!==c.id&&x.type===c.type&&x.name.toLocaleLowerCase('ru')===c.name.toLocaleLowerCase('ru'))) return toast('Такая категория уже существует.');
  await save('categories',c);await loadData();closeModal();render();toast('Категория сохранена.');
 }
@@ -865,7 +907,7 @@ function bind(){
     state.profileId=state.deviceOwner;state.walletId=null;saveLocal(FAMILY_KEY,state.profileId);render();return;
    }
    if(a==='quick-type'){quickType=el.dataset.type;refreshQuickCategoryPicker();return;}
-   if(a==='choose-quick-category'){const chosen=state.categories.find(c=>c.id===id&&c.type===quickType);if(chosen){closeModal();openTransaction(null,quickType,id);}return;}
+   if(a==='choose-quick-category'){const chosen=state.categories.find(c=>c.id===id&&c.type===quickType);if(chosen&&!isCategoryHidden(chosen)){closeModal();openTransaction(null,quickType,id);}return;}
    if(a==='quick-no-category'){closeModal();openTransaction(null,quickType);return;}
    if(a==='quick-income'||a==='quick-expense'){closeModal();openTransaction(null,a==='quick-income'?'income':'expense');return;}
    if(a==='add-deposit'){openDeposit();return;}
@@ -891,6 +933,22 @@ function bind(){
    if(a==='add-wallet'){openWallet();return;}
    if(a==='edit-wallet'){openWallet(id);return;}
    if(a==='choose-wallet'){state.walletId=id;render();return;}
+   if(a==='open-categories'){setPage('categories');return;}
+   if(a==='back-to-settings'){setPage('settings');return;}
+   if(a==='category-type'){state.catUI.type=el.dataset.type;state.catUI.view='active';render();return;}
+   if(a==='category-view'){state.catUI.view=el.dataset.view;render();return;}
+   if(a==='toggle-category'){
+     const old=state.categories.find(c=>c.id===id);if(!old)return;
+     const hidden=new Set(old.hiddenProfiles||[]),wasHidden=hidden.has(state.profileId);
+     if(wasHidden)hidden.delete(state.profileId);else hidden.add(state.profileId);
+     await save('categories',{...old,hiddenProfiles:[...hidden]});await loadData();render();toast(wasHidden?'Категория снова активна.':'Категория скрыта из выбора.');return;
+   }
+   if(a==='choose-category-icon'){
+     const form=el.closest('#category-form'),icon=el.dataset.icon;
+     if(!form||!CATEGORY_ICONS.has(icon))return;
+     form.elements.icon.value=icon;form.querySelector('#cat-editor-preview').textContent=icon;
+     form.querySelectorAll('.cat-icon-pick').forEach(b=>{const yes=b.dataset.icon===icon;b.classList.toggle('chosen',yes);b.setAttribute('aria-pressed',String(yes));});return;
+   }
    if(a==='add-category'){openCategory();return;}
    if(a==='edit-category'){openCategory(id);return;}
    if(a==='backup-json'){backupJSON();return;}
@@ -916,6 +974,7 @@ function bind(){
  document.addEventListener('change',async e=>{
   const el=e.target,id=el.id;
   if(id==='wallet-picker'){state.walletId=el.value;render();return;}
+  if(id==='category-manager-sort'){state.catUI.sort=el.value;$('#categories-results').innerHTML=categoryManagerItems();return;}
   if(el.name==='deposit'&&el.closest('#deposit-interest-form')){const d=state.wallets.find(w=>w.id===el.value);const dest=el.closest('form').querySelector('[name=creditWallet]');if(d&&dest)dest.innerHTML=walletOptions(d.id,w=>w.currency===d.currency);return;}
   if(id==='device-owner'){
    state.deviceOwner=el.value==='wife'?'wife':'me';saveLocal(DEVICE_KEY,state.deviceOwner);
@@ -950,7 +1009,7 @@ function bind(){
 
   if(e.target.id==='tx-search'){state.txFilters.search=e.target.value;state.maxTx=100;$('#global-search').value=e.target.value;$('#tx-list').innerHTML=transactionList();}
   if(e.target.id==='global-search'){state.txFilters.search=e.target.value;state.maxTx=100;if(state.page!=='transactions')setPage('transactions');else $('#tx-list').innerHTML=transactionList();}
-  if(e.target.id==='category-search'){$('#category-list').innerHTML=categoryList(e.target.value);}
+  if(e.target.id==='category-manager-search'){state.catUI.search=e.target.value;$('#categories-results').innerHTML=categoryManagerItems();}
   if(e.target.id==='quick-category-search'){$('#quick-category-grid').innerHTML=quickCategoryItems(e.target.value);}
  });
  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal(); if(e.target.closest('#tx-form')&&!e.target.closest('.tx-extra')&&(e.key===','||e.key==='.'||/^[0-9]$/.test(e.key)||e.key==='Backspace')){e.preventDefault();useKeypadKey(e.key==='Backspace'?'back':e.key==='.'?',':e.key);return;} if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-action=select-month]')){e.preventDefault();e.target.click();}});
